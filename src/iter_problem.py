@@ -4,6 +4,7 @@ import pyomo.environ as pe
 import pyomo.opt as po
 
 from scipy.optimize import minimize
+from utils import draw_clearing_market
 
 def get_lower_level_model(offer, production_limit):
     '''
@@ -98,6 +99,20 @@ def make_upper_objective(costs, production_limit, initial_offer_list):
         res = solver.solve(model, tee=False)
 
         market_price = model.dual[model.constraint_power_balance]
+        
+        draw_clearing_market(
+            list(model.demands), 
+            list(model.own_generators), 
+            list(model.external_generators),
+            {k: pe.value(model.consumption_limit[k]) for k in model.demands},
+            {k: pe.value(model.own_production_limit[k]) for k in model.own_generators},
+            {k: pe.value(model.external_production_limit[k]) for k in model.external_generators},
+            {k: pe.value(model.demand_bid[k]) for k in model.demands},
+            {k: pe.value(model.own_generators_offer[k]) for k in model.own_generators},
+            {k: pe.value(model.external_generators_offer[k]) for k in model.external_generators},
+            market_price, 
+            sum([pe.value(model.consumption[k]) for k in model.demands])
+        )
         print(f"{market_price = }")
         print(f"{offers = }")
         print("-"*50)
@@ -108,7 +123,7 @@ def make_upper_objective(costs, production_limit, initial_offer_list):
     return obj
 
 def main():
-    # your generators’ marginal costs C_i
+    # your generators marginal costs C_i
     costs = {
         'og1': 1,
         'og2': 2
@@ -118,13 +133,14 @@ def main():
         'og2': 50
     }
     # initial guess for their offer prices αᵢ^offer
-    x0 = [3.0, 5.0]
+    # x0 = [3.0, 5.0]
+    x0 = [1.35, 10.75]
 
     upper_obj = make_upper_objective(costs, production_limit, x0)
     result = minimize(upper_obj,
                       x0,
                       method='Nelder-Mead',
-                      options={'maxiter':50, 'disp':True})
+                      options={'maxiter': 15, 'disp':True})
 
     print("Optimal offers:", result.x)
     print("Max profit    :", -result.fun)
