@@ -71,5 +71,68 @@ def test_drawing():
     }
     draw_clearing_market(demands, own_generators, external_generators, consumption_limit, own_production_limit, external_production_limit, demands_bid, own_generators_offer, external_generators_offer, 10, 150)
 
+def get_name_index(name, index):
+    return f"{name}{index}"
+
+def draw_market_price_vs_ppa_percentage(hours, market_price, ppa_percentage, path):
+    fig, ax1 = plt.subplots()
+
+    # Plot temperature on the left y-axis
+    ax1.plot(hours, market_price, 'r-o', label='Market price (€/kWh)')
+    ax1.set_xlabel('Hour')
+    ax1.set_ylabel('Market price (€/kWh)', color='r')
+    ax1.tick_params(axis='y', labelcolor='r')
+
+    # Create a second y-axis for electricity consumption
+    ax2 = ax1.twinx()
+    ax2.plot(hours, ppa_percentage, 'b-s', label='Fraction dedicated to PPA')
+    ax2.set_ylabel('Fraction dedicated to PPA', color='b')
+    ax2.tick_params(axis='y', labelcolor='b')
+
+    # Add title and show plot
+    plt.title('Timeframe market price and fraction dedicated to PPA')
+    fig.tight_layout()
+    plt.savefig(path)
+
+def draw_continous_market_price_vs_ppa_percentage(hours, market_prices, ppa_percentages, offers, path):
+    fig, ax1 = plt.subplots()
+
+    cmap_red = plt.cm.Reds
+    cmap_green = plt.cm.Greens
+    cmap_blue = plt.cm.Blues
+    
+    n_lines = len(market_prices)
+    # Plot on the left y-axis
+    for i in range(n_lines):
+        color = cmap_red(i / (n_lines - 1))  # Gradient color based on index
+        if i == n_lines - 1:
+            ax1.plot(hours, market_prices[i], color=color, label="Market Price")
+        else:
+            ax1.plot(hours, market_prices[i], color=color)
+    for i in range(n_lines):
+        color = cmap_green(i / (n_lines - 1))  # Gradient color based on index
+        if i == n_lines - 1:
+            ax1.plot(hours, offers[i], color=color, label="Offer Price")
+        else:
+            ax1.plot(hours, offers[i], color=color)
+    ax1.set_xlabel('Hour')
+    ax1.set_ylabel('Price (€/kWh)', color='r')
+    ax1.tick_params(axis='y', labelcolor='r')
+    ax1.set_ymargin(0.2)
+
+    # Create a second y-axis
+    ax2 = ax1.twinx()
+    for i in range(n_lines):
+        color = cmap_blue(i / (n_lines - 1))  # Gradient color based on index
+        ax2.plot(hours, ppa_percentages[i], color=color)
+    ax2.set_ylabel('Fraction dedicated to PPA', color='b')
+    ax2.tick_params(axis='y', labelcolor='b')
+
+    # Add title and show plot
+    plt.title('Timeframe market price and fraction dedicated to PPA')
+    fig.tight_layout()
+    fig.legend(loc='outside right lower')
+    plt.savefig(path)
+
 if __name__ == "__main__":
     test_drawing()
