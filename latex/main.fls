@@ -1,6 +1,6 @@
-PWD c:\Users\avela\Documents\IMAT\TFG\Formulacion
+PWD c:\Users\avela\Documents\IMAT\TFG\bilevel-optm\latex
 INPUT C:\Users\avela\AppData\Local\MiKTeX\miktex\data\le\pdftex\pdflatex.fmt
-INPUT c:\Users\avela\Documents\IMAT\TFG\Formulacion\main.tex
+INPUT c:\Users\avela\Documents\IMAT\TFG\bilevel-optm\latex\main.tex
 OUTPUT main.log
 INPUT C:\Users\avela\AppData\Local\Programs\MiKTeX\tex\latex\base\article.cls
 INPUT C:\Users\avela\AppData\Local\Programs\MiKTeX\tex\latex\base\article.cls
