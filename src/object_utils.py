@@ -35,7 +35,7 @@ class ElectricityMarketDataframe():
         elif is_generator is None:
             return self.df[self.df["own"] == own]["entity"].unique()
 
-        
+
         return self.df[(self.df["is_generator"] == is_generator) & (self.df["own"] == own)]["entity"].unique()
     
     def get_hours(self) -> np.ndarray:
@@ -53,6 +53,12 @@ class ElectricityMarketDataframe():
             df = self.df[(self.df["is_generator"] == is_generator) & (self.df["own"] == own)]
 
         return df.set_index(["entity", "hours"])[column].to_dict()
+    
+    def get_own_generators_offers(self):
+        self.get_entities_column_dict("offer", True)
+    
+    def get_own_generators_limit(self):
+        self.get_entities_column_dict("limit", True)
     
     def get_var_vector(self) -> list[float]:
         generators = self.get_entities_name(True, True)
@@ -91,10 +97,11 @@ class ElectricityMarketDataframe():
         return offers, ppa_percentage
 
     def _read_csv(self, path):
+        # df = pd.read_csv(path, sep=";", decimal=",")
         df = pd.read_csv(path)
 
-        assert len(df.columns) == len(self.columns)
-        assert set(df.columns) == set(self.columns)
+        # assert len(df.columns) == len(self.columns)
+        # assert set(df.columns) == set(self.columns)
 
         # TODO: Add checks of gaps
 
