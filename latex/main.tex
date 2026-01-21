@@ -28,15 +28,34 @@ Sean:
   \item $Y$: conjunto de años naturales, con mapeo $y:T\to Y$.
 \end{itemize}
 
+
 Parámetros:
 \begin{itemize}
-  \item $\alpha_{j,t}$: coste marginal del generador $j$ en hora $t$.
-  \item $\beta_{l,t}$: utilidad marginal de demanda $l$ en hora $t$.
-  \item $Q_{j,t}$: capacidad máxima ofertable del generador $j$.
-  \item $D_{l,t}$: demanda máxima de $l$ en hora $t$.
-  \item $x_{i,y} \in [0,1]$: fracción de producción del agente $i$ vendida como PPA en el año $y$ (decisión del nivel superior).
-  \item $\gamma$: precio del PPA
+    \item $\alpha_{j,t}$: coste marginal del generador $j$ en hora $t$.
+    \item $\beta_{l,t}$: utilidad marginal de demanda $l$ en hora $t$.
+    \item $Q_{j,t}$: capacidad máxima ofertable del generador $j$.
+    \item $D_{l,t}$: demanda máxima de $l$ en hora $t$.
+    \item $x_{i,y} \in [0,1]$: fracción de producción del agente $i$ vendida como PPA en el año $y$ (decisión del nivel superior).
+    \item $\gamma$: precio del PPA
+    % Parámetros de almacenamiento (batería del agente estratégico $i$)
+    \item $\rho$: estado inicial de carga de la batería.
+    \item $\eta^{ch}$: eficiencia de carga de la batería.
+    \item $\eta^{dis}$: eficiencia de descarga de la batería.
+    \item $E^{\max}$: capacidad máxima de almacenamiento de la batería.
+    \item $P^{ch,\max}$: potencia máxima de carga.
+    \item $P^{dis,\max}$: potencia máxima de descarga.
 \end{itemize}
+
+Variables:
+\begin{itemize}
+    \item $q_{j,t}$: energía ofertada por el generador $j$ en hora $t$.
+    \item $d_{l,t}$: demanda atendida del consumidor $l$ en hora $t$.
+    \item $SOC_t$: estado de carga de la batería del agente estratégico $i$ en hora $t$.
+    \item $ch_t$: energía cargada en la batería en hora $t$.
+    \item $dis_t$: energía descargada de la batería en hora $t$.
+\end{itemize}
+
+\textit{La batería pertenece al generador estratégico $i$ y puede almacenar energía que no venda en el mercado spot.}
 
 Problema del nivel inferior:
 
@@ -60,7 +79,14 @@ Problema del nivel inferior:
 & 0 \le d_{l,t} \le D_{l,t} 
 \quad (\perp\; \omega^{d,\min}_{l,t},\;\omega^{d,\max}_{l,t})
 \quad \forall l,\; \forall t.
-\label{LF_dem}
+\label{LF_dem}\\
+% Restricciones de almacenamiento (batería del agente estratégico i)
+& SOC_0 = \rho \\
+& SOC_t = SOC_{t-1} + \eta^{ch} ch_t - \frac{1}{\eta^{dis}} dis_t \quad \forall t=1,\dots,T \\
+& 0 \leq SOC_t \leq E^{\max} \quad \forall t \\
+& 0 \leq ch_t \leq P^{ch,\max} \quad \forall t \\
+& 0 \leq dis_t \leq P^{dis,\max} \quad \forall t \\
+& SOC_0 = SOC_T \\
 \end{align}
 
 \subsection{Lagrangiano del problema inferior}
@@ -77,21 +103,38 @@ El Lagrangiano asociado al problema de clearing del mercado eléctrico es:
 & + \sum_{t} \omega^{q,\min}_{i,t}\, q_{i,t}
 + \sum_{t} \omega^{q,\max}_{i,t}\, \left( (1-x_{i,y(t)}) Q_{i,t} - q_{i,t} \right) \\
 & + \sum_{l,t} \omega^{d,\min}_{l,t}\, d_{l,t}
-+ \sum_{l,t} \omega^{d,\max}_{l,t}\, (D_{l,t} - d_{l,t})
++ \sum_{l,t} \omega^{d,\max}_{l,t}\, (D_{l,t} - d_{l,t}) \\
+& + \mu_0 (SOC_0 - \rho) \\
+& + \sum_{t=1}^T \mu_t (SOC_t - SOC_{t-1} - \eta^{ch} ch_t + \frac{1}{\eta^{dis}} dis_t) \\
+& + \sum_{t} \phi_t^{SOC,\min} SOC_t + \sum_{t} \phi_t^{SOC,\max} (E^{\max} - SOC_t) \\
+& + \sum_{t} \phi_t^{ch,\min} ch_t + \sum_{t} \phi_t^{ch,\max} (P^{ch,\max} - ch_t) \\
+& + \sum_{t} \phi_t^{dis,\min} dis_t + \sum_{t} \phi_t^{dis,\max} (P^{dis,\max} - dis_t) \\
+& + \psi ( SOC_T - SOC_0 )
 \end{align}
+
+Donde $\mu_t$, $\phi_t^{SOC,\min}$, $\phi_t^{SOC,\max}$, $\phi_t^{ch,\min}$, $\phi_t^{ch,\max}$, $\phi_t^{dis,\min}$, $\phi_t^{dis,\max}$ y $\psi$ son los multiplicadores de Lagrange asociados a las restricciones de almacenamiento.
 
 Importante apuntar que es un problema de maximizacion y esto cambia el signo de las restricciones de desigualdad al introducirlas en el Lagrangiano.
 
 \subsection{KKT del nivel inferior}
 \begin{itemize}
+
+
     \item \textbf{Factibilidad primal:}
     Son las restricciones originales del problema.
     \begin{align}
         &\forall t: && \sum_{j} q_{j,t} - \sum_{l} d_{l,t} = 0 \\
         &\forall j \neq i,\, \forall t: && 0 \leq q_{j,t} \leq Q_{j,t} \\
         &\forall t: && 0 \leq q_{i,t} \leq (1-x_{i,y(t)}) Q_{i,t} \\
-        &\forall l,\, \forall t: && 0 \leq d_{l,t} \leq D_{l,t}
+        &\forall l,\, \forall t: && 0 \leq d_{l,t} \leq D_{l,t} \\
+        & && SOC_0 = \rho \\
+        &\forall t=1,\dots,T: && SOC_t = SOC_{t-1} + \eta^{ch} ch_t - \frac{1}{\eta^{dis}} dis_t \\
+        &\forall t: && 0 \leq SOC_t \leq E^{\max} \\
+        &\forall t: && 0 \leq ch_t \leq P^{ch,\max} \\
+        &\forall t: && 0 \leq dis_t \leq P^{dis,\max} \\
+        & && SOC_T = SOC_0
     \end{align}
+
 
     \item \textbf{Condiciones de complementariedad:}
     Para cada restricción la variable no se encuentra en el límite (la variable del dual es 0) o bien al encontrarse en el límite dicha restricción puede ser responsable de no poder mejorar el valor de la función objetivo (la variable de dual puede no ser 0). Importante notar que no se aplica condición de complementariedad para las restricciones de igualdad, aunque estuviera indicado en la descripción del problema, pues esto es para indicar cual es la variable dual asociada para poder nombrarla en el nivel superior.
@@ -100,28 +143,41 @@ Importante apuntar que es un problema de maximizacion y esto cambia el signo de 
         &\forall j \neq i,\, t: && \omega^{q,\max}_{j,t} \cdot (q_{j,t} - Q_{j,t}) = 0 \\
         &\forall t: && \omega^{q,\max}_{i,t} \cdot (q_{i,t} - (1-x_{i,y(t)}) Q_{i,t}) = 0 \\
         &\forall l,\, t: && \omega^{d,\min}_{l,t} \cdot d_{l,t} = 0 \\
-        &\forall l,\, t: && \omega^{d,\max}_{l,t} \cdot (d_{l,t} - D_{l,t}) = 0
+        &\forall l,\, t: && \omega^{d,\max}_{l,t} \cdot (d_{l,t} - D_{l,t}) = 0 \\
+        &\forall t: && \phi_t^{SOC,\min} \cdot SOC_t = 0 \\
+        &\forall t: && \phi_t^{SOC,\max} \cdot (E^{\max} - SOC_t) = 0 \\
+        &\forall t: && \phi_t^{ch,\min} \cdot ch_t = 0 \\
+        &\forall t: && \phi_t^{ch,\max} \cdot (P^{ch,\max} - ch_t) = 0 \\
+        &\forall t: && \phi_t^{dis,\min} \cdot dis_t = 0 \\
+        &\forall t: && \phi_t^{dis,\max} \cdot (P^{dis,\max} - dis_t) = 0
     \end{align}
 
     \item \textbf{Factibilidad dual:}
     Las restricciones de desigualdad deben ser no negativas para encontrarse en el óptimo. Si alguna fuera negativa significaría que todavía se puede mejorar el valor de la función objetivo. Que todas deban ser no negativas pese a algunas ser cotas inferiores y otras superiores es porque las cotas inferiores ($0 \le x$) se pueden expresar como $-x \le 0$, lo cual resulta en un multplicador positivo.
     \begin{align}
         &\forall j,\, t: && \omega^{q,\min}_{j,t} \geq 0,\quad \omega^{q,\max}_{j,t} \geq 0 \\
-        &\forall l,\, t: && \omega^{d,\min}_{l,t} \geq 0,\quad \omega^{d,\max}_{l,t} \geq 0
+        &\forall l,\, t: && \omega^{d,\min}_{l,t} \geq 0,\quad \omega^{d,\max}_{l,t} \geq 0 \\
+        &\forall t: && \phi_t^{SOC,\min} \geq 0,\quad \phi_t^{SOC,\max} \geq 0 \\
+        &\forall t: && \phi_t^{ch,\min} \geq 0,\quad \phi_t^{ch,\max} \geq 0 \\
+        &\forall t: && \phi_t^{dis,\min} \geq 0,\quad \phi_t^{dis,\max} \geq 0
     \end{align}
 
     \item \textbf{Condiciones de estacionalidad:}
-    Por último, para encontrarnos en el óptimo las derivadas parciales del Lagrangiano respecto a las variables del problema inferior deben ser 0. Estas variables son: $q_{i,t}, q_{j,t}, d_{l,t}$.
+    Por último, para encontrarnos en el óptimo las derivadas parciales del Lagrangiano respecto a las variables del problema inferior deben ser 0. Estas variables son: $q_{i,t}, q_{j,t}, d_{l,t}, SOC_t, ch_t, dis_t$.
     \begin{align}
         &\forall j \neq i,\, \forall t: && -\alpha_{j,t} + \lambda_t - \omega^{q,\min}_{j,t} + \omega^{q,\max}_{j,t} = 0 \\
         &\forall t: && -\alpha_{i,t} + \lambda_t - \omega^{q,\min}_{i,t} + \omega^{q,\max}_{i,t} = 0 \\
-        &\forall l,\, \forall t: && \beta_{l,t} - \lambda_t - \omega^{d,\min}_{l,t} + \omega^{d,\max}_{l,t} = 0
+        &\forall l,\, \forall t: && \beta_{l,t} - \lambda_t - \omega^{d,\min}_{l,t} + \omega^{d,\max}_{l,t} = 0 \\
+        &\forall t: && \frac{\partial \mathcal{L}}{\partial SOC_t} = 0 \\
+        &\forall t: && \frac{\partial \mathcal{L}}{\partial ch_t} = 0 \\
+        &\forall t: && \frac{\partial \mathcal{L}}{\partial dis_t} = 0
     \end{align}
 
 \end{itemize}
 
-\paragraph{}
-\textbf{Linealización de las condiciones de complementariedad: big-M}
+\subsection{Linealización de las condiciones de complementariedad: big-M}
+
+\subsubsection{Linealización de las condiciones de complementariedad en variables $\omega$}
 
 Para poder resolver el problema superior como un problema de optimización estándar, es necesario transformar las condiciones de complementariedad en restricciones lineales. Esto se logra mediante la técnica del big-M, introduciendo variables binarias y un parámetro $M$ suficientemente grande.
 
@@ -178,6 +234,47 @@ Por ejemplo:
         &z^{d,\min}_{l,t},\; z^{d,\max}_{l,t} \in \{0,1\}
     \end{align}
 \end{itemize}
+
+\subsubsection{Linealización de las condiciones de complementariedad en variables $\phi$}
+
+Para las condiciones de complementariedad asociadas a las variables de almacenamiento ($\phi$), se utiliza el mismo esquema big-M que para las $\omega$. Para cada restricción de almacenamiento:
+
+\begin{itemize}
+    \item \textbf{Estado de carga $SOC_t$:}
+    \begin{align}
+        &\phi_t^{SOC,\min} \leq M^{SOC,\min} \cdot z_t^{SOC,\min} \\
+        &SOC_t \leq M^{SOC,\min} \cdot (1 - z_t^{SOC,\min}) \\
+        &\phi_t^{SOC,\max} \leq M^{SOC,\max} \cdot z_t^{SOC,\max} \\
+        &E^{\max} - SOC_t \leq M^{SOC,\max} \cdot (1 - z_t^{SOC,\max}) \\
+        &z_t^{SOC,\min},\; z_t^{SOC,\max} \in \{0,1\}
+    \end{align}
+    \item \textbf{Carga $ch_t$:}
+    \begin{align}
+        &\phi_t^{ch,\min} \leq M^{ch,\min} \cdot z_t^{ch,\min} \\
+        &ch_t \leq M^{ch,\min} \cdot (1 - z_t^{ch,\min}) \\
+        &\phi_t^{ch,\max} \leq M^{ch,\max} \cdot z_t^{ch,\max} \\
+        &P^{ch,\max} - ch_t \leq M^{ch,\max} \cdot (1 - z_t^{ch,\max}) \\
+        &z_t^{ch,\min},\; z_t^{ch,\max} \in \{0,1\}
+    \end{align}
+    \item \textbf{Descarga $dis_t$:}
+    \begin{align}
+        &\phi_t^{dis,\min} \leq M^{dis,\min} \cdot z_t^{dis,\min} \\
+        &dis_t \leq M^{dis,\min} \cdot (1 - z_t^{dis,\min}) \\
+        &\phi_t^{dis,\max} \leq M^{dis,\max} \cdot z_t^{dis,\max} \\
+        &P^{dis,\max} - dis_t \leq M^{dis,\max} \cdot (1 - z_t^{dis,\max}) \\
+        &z_t^{dis,\min},\; z_t^{dis,\max} \in \{0,1\}
+    \end{align}
+\end{itemize}
+
+\paragraph{}
+\textbf{Elección del parámetro $M$ para almacenamiento}
+
+Al igual que en el caso de las variables $\omega$, el valor de $M$ debe ser suficientemente grande para no restringir el espacio factible, pero no excesivamente grande para evitar problemas numéricos. Se recomienda:
+\begin{itemize}
+    \item Para las variables primales: usar las cotas naturales de cada variable ($E^{\max}$ para $SOC_t$, $P^{ch,\max}$ para $ch_t$, $P^{dis,\max}$ para $dis_t$).
+    \item Para los multiplicadores duales ($\phi$): un valor razonable es el máximo impacto que puede tener la restricción en el objetivo, por ejemplo, el precio máximo de la energía en el mercado o el máximo coste marginal de generación.
+\end{itemize}
+
 
 \section{Nivel superior: agente estratégico renovable}
 
