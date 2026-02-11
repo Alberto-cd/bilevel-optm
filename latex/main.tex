@@ -62,33 +62,39 @@ Problema del nivel inferior:
 \begin{align}
 \max_{q,d}\;\;
 & \sum_{l,t} \beta_{l,t}\, d_{l,t}
+\;-\; \alpha_{i,t}\, dis_t 
 \;-\; \sum_{j,t} \alpha_{j,t}\, q_{j,t}
 \label{LF_obj}\\[2mm]
 \text{s.a.}\;\;
-& \sum_{j} q_{j,t} \;-\; \sum_{l} d_{l,t}  \;=\; 0 
+& \sum_{j} q_{j,t} + dis_t \;-\; \sum_{l} d_{l,t}  \;=\; 0 
 \qquad (\perp\; \lambda_t)\quad \forall t
 \label{LF_balance}\\
 & 0 \le q_{j,t} \le Q_{j,t} 
 \quad (\perp\; \omega^{q,\min}_{j,t},\;\omega^{q,\max}_{j,t})
 \quad \forall j\neq i,\; \forall t
 \label{LF_cap_others}\\
-& 0 \le q_{i,t} \le (1-x_{i,y(t)})\,Q_{i,t}
-\quad (\perp\; \omega^{q,\min}_{i,t},\;\omega^{q,\max}_{i,t})
+& 0 \le q_{i,t}
+\quad (\perp\; \omega^{q,\min}_{i,t})
 \quad \forall t
-\label{LF_cap_i}\\
+\label{LF_cap_i_min}\\
+& q_{i,t} + ch_t \le (1-x_{i,y(t)})\,Q_{i,t}
+\quad (\perp\; \omega^{q,\max}_{i,t})
+\quad \forall t
+\label{LF_cap_i_max}\\
 & 0 \le d_{l,t} \le D_{l,t} 
 \quad (\perp\; \omega^{d,\min}_{l,t},\;\omega^{d,\max}_{l,t})
 \quad \forall l,\; \forall t.
 \label{LF_dem}\\
 % Restricciones de almacenamiento (batería del agente estratégico i)
-& SOC_0 = \rho \\
-& SOC_t = SOC_{t-1} + \eta^{ch} ch_t - \frac{1}{\eta^{dis}} dis_t \quad \forall t=1,\dots,T \\
+& SOC_1 = \rho + \eta^{ch} ch_1 - \frac{1}{\eta^{dis}} dis_1 \quad t=1 \\
+& SOC_t = SOC_{t-1} + \eta^{ch} ch_t - \frac{1}{\eta^{dis}} dis_t \quad \forall t=2,\dots,T \\
 & 0 \leq SOC_t \leq E^{\max} \quad \forall t \\
 & 0 \leq ch_t \leq P^{ch,\max} \quad \forall t \\
 & 0 \leq dis_t \leq P^{dis,\max} \quad \forall t \\
-& SOC_0 = SOC_T \\
+& SOC_T = \rho \\
 \end{align}
 
+\clearpage
 \subsection{Lagrangiano del problema inferior}
 
 El Lagrangiano asociado al problema de clearing del mercado eléctrico es:
@@ -96,20 +102,21 @@ El Lagrangiano asociado al problema de clearing del mercado eléctrico es:
 \begin{align}
 \mathcal{L} =\;
 & \sum_{l,t} \beta_{l,t}\, d_{l,t}
+- \alpha_{i,t}\, dis_t
 - \sum_{j,t} \alpha_{j,t}\, q_{j,t} \\
-& + \sum_{t} \lambda_t \left( \sum_{j} q_{j,t} - \sum_{l} d_{l,t} \right) \\
+& + \sum_{t} \lambda_t \left( dis_t + \sum_{j} q_{j,t} - \sum_{l} d_{l,t} \right) \\
 & + \sum_{j \neq i,\, t} \omega^{q,\min}_{j,t}\, q_{j,t}
 + \sum_{j \neq i,\, t} \omega^{q,\max}_{j,t}\, (Q_{j,t} - q_{j,t}) \\
 & + \sum_{t} \omega^{q,\min}_{i,t}\, q_{i,t}
-+ \sum_{t} \omega^{q,\max}_{i,t}\, \left( (1-x_{i,y(t)}) Q_{i,t} - q_{i,t} \right) \\
++ \sum_{t} \omega^{q,\max}_{i,t}\, \left( (1-x_{i,y(t)}) Q_{i,t} - q_{i,t} - ch_t \right) \\
 & + \sum_{l,t} \omega^{d,\min}_{l,t}\, d_{l,t}
 + \sum_{l,t} \omega^{d,\max}_{l,t}\, (D_{l,t} - d_{l,t}) \\
-& + \mu_0 (SOC_0 - \rho) \\
-& + \sum_{t=1}^T \mu_t (SOC_t - SOC_{t-1} - \eta^{ch} ch_t + \frac{1}{\eta^{dis}} dis_t) \\
+& + \mu_1 (SOC_1 - \rho - \eta^{ch} ch_1 + \frac{1}{\eta^{dis}} dis_1) \\
+& + \sum_{t=2}^T \mu_t (SOC_t - SOC_{t-1} - \eta^{ch} ch_t + \frac{1}{\eta^{dis}} dis_t) \\
 & + \sum_{t} \phi_t^{SOC,\min} SOC_t + \sum_{t} \phi_t^{SOC,\max} (E^{\max} - SOC_t) \\
 & + \sum_{t} \phi_t^{ch,\min} ch_t + \sum_{t} \phi_t^{ch,\max} (P^{ch,\max} - ch_t) \\
 & + \sum_{t} \phi_t^{dis,\min} dis_t + \sum_{t} \phi_t^{dis,\max} (P^{dis,\max} - dis_t) \\
-& + \psi ( SOC_T - SOC_0 )
+& + \psi (SOC_T - \rho)
 \end{align}
 
 Donde $\mu_t$, $\phi_t^{SOC,\min}$, $\phi_t^{SOC,\max}$, $\phi_t^{ch,\min}$, $\phi_t^{ch,\max}$, $\phi_t^{dis,\min}$, $\phi_t^{dis,\max}$ y $\psi$ son los multiplicadores de Lagrange asociados a las restricciones de almacenamiento.
@@ -119,20 +126,19 @@ Importante apuntar que es un problema de maximizacion y esto cambia el signo de 
 \subsection{KKT del nivel inferior}
 \begin{itemize}
 
-
     \item \textbf{Factibilidad primal:}
     Son las restricciones originales del problema.
     \begin{align}
-        &\forall t: && \sum_{j} q_{j,t} - \sum_{l} d_{l,t} = 0 \\
+        &\forall t: && dis_t + \sum_{j} q_{j,t} - \sum_{l} d_{l,t} = 0 \\
         &\forall j \neq i,\, \forall t: && 0 \leq q_{j,t} \leq Q_{j,t} \\
-        &\forall t: && 0 \leq q_{i,t} \leq (1-x_{i,y(t)}) Q_{i,t} \\
+        &\forall t: && 0 \leq q_{i,t} + ch_t \leq (1-x_{i,y(t)}) Q_{i,t} \\
         &\forall l,\, \forall t: && 0 \leq d_{l,t} \leq D_{l,t} \\
-        & && SOC_0 = \rho \\
-        &\forall t=1,\dots,T: && SOC_t = SOC_{t-1} + \eta^{ch} ch_t - \frac{1}{\eta^{dis}} dis_t \\
+        & t=1: && SOC_1 = \rho + \eta^{ch} ch_1 - \frac{1}{\eta^{dis}} dis_1 \\
+        &\forall t=2,\dots,T: && SOC_t = SOC_{t-1} + \eta^{ch} ch_t - \frac{1}{\eta^{dis}} dis_t \\
         &\forall t: && 0 \leq SOC_t \leq E^{\max} \\
         &\forall t: && 0 \leq ch_t \leq P^{ch,\max} \\
         &\forall t: && 0 \leq dis_t \leq P^{dis,\max} \\
-        & && SOC_T = SOC_0
+        & && SOC_T = \rho
     \end{align}
 
 
@@ -141,7 +147,7 @@ Importante apuntar que es un problema de maximizacion y esto cambia el signo de 
     \begin{align}
         &\forall j,\, t: && \omega^{q,\min}_{j,t} \cdot q_{j,t} = 0 \\
         &\forall j \neq i,\, t: && \omega^{q,\max}_{j,t} \cdot (q_{j,t} - Q_{j,t}) = 0 \\
-        &\forall t: && \omega^{q,\max}_{i,t} \cdot (q_{i,t} - (1-x_{i,y(t)}) Q_{i,t}) = 0 \\
+        &\forall t: && \omega^{q,\max}_{i,t} \cdot (q_{i,t} + ch_t - (1-x_{i,y(t)}) Q_{i,t}) = 0 \\
         &\forall l,\, t: && \omega^{d,\min}_{l,t} \cdot d_{l,t} = 0 \\
         &\forall l,\, t: && \omega^{d,\max}_{l,t} \cdot (d_{l,t} - D_{l,t}) = 0 \\
         &\forall t: && \phi_t^{SOC,\min} \cdot SOC_t = 0 \\
@@ -168,9 +174,13 @@ Importante apuntar que es un problema de maximizacion y esto cambia el signo de 
         &\forall j \neq i,\, \forall t: && -\alpha_{j,t} + \lambda_t - \omega^{q,\min}_{j,t} + \omega^{q,\max}_{j,t} = 0 \\
         &\forall t: && -\alpha_{i,t} + \lambda_t - \omega^{q,\min}_{i,t} + \omega^{q,\max}_{i,t} = 0 \\
         &\forall l,\, \forall t: && \beta_{l,t} - \lambda_t - \omega^{d,\min}_{l,t} + \omega^{d,\max}_{l,t} = 0 \\
-        &\forall t: && \frac{\partial \mathcal{L}}{\partial SOC_t} = 0 \\
-        &\forall t: && \frac{\partial \mathcal{L}}{\partial ch_t} = 0 \\
-        &\forall t: && \frac{\partial \mathcal{L}}{\partial dis_t} = 0
+        &\forall t: && \begin{cases}
+            \mu_1 + \phi_1^{SOC,\min} - \phi_1^{SOC,\max} = 0 & \text{si } t=1 \\
+            \mu_t - \mu_{t+1} + \phi_t^{SOC,\min} - \phi_t^{SOC,\max} = 0 & \text{si } 1 < t < T \\
+            \mu_T + \phi_T^{SOC,\min} - \phi_T^{SOC,\max} + \psi = 0 & \text{si } t=T
+        \end{cases} \\
+        &\forall t: && - \mu_t \eta^{ch} + \omega^{q,\max}_{i,t} + \phi_t^{ch,\min} - \phi_t^{ch,\max} = 0 \\
+        &\forall t: && - \alpha_{i,t} + \lambda_t + \mu_t \frac{1}{\eta^{dis}} + \phi_t^{dis,\min} - \phi_t^{dis,\max} = 0
     \end{align}
 
 \end{itemize}
@@ -220,7 +230,7 @@ Por ejemplo:
     \item \textbf{Generador estratégico $i$:}
     \begin{align}
         &\omega^{q,\min}_{i,t} \leq M \cdot z^{q,\min}_{i,t} \\
-        &q_{i,t} \leq M \cdot (1 - z^{q,\min}_{i,t}) \\
+        &q_{i,t} + ch_t \leq M \cdot (1 - z^{q,\min}_{i,t}) \\
         &\omega^{q,\max}_{i,t} \leq M \cdot z^{q,\max}_{i,t} \\
         &q_{i,t} - (1-x_{i,y(t)}) Q_{i,t} \leq M \cdot (1 - z^{q,\max}_{i,t}) \\
         &z^{q,\min}_{i,t},\; z^{q,\max}_{i,t} \in \{0,1\}
