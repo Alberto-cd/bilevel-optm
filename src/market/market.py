@@ -1,27 +1,27 @@
 import pyomo.environ as pe
 import pyomo.opt as po
 
-from scipy.optimize import minimize
+from ..data import ElectricityMarketCurvesDataframe, ElectricityMarketSolvedDataframe
+from ..constants import MAIN_CSV, SOLVED_CSV, SOLVED_PLOTS
 
-from object_utils import ElectricityMarketDataframe
-
-
-class BilivelProblem():
-    def __init__(self, df: ElectricityMarketDataframe, years: int = 10):
-        self.df: ElectricityMarketDataframe = df
-        self.years = years
-        self.model = None
+class MarketClearingProblem():
+    def __init__(self, path:str=MAIN_CSV):
+        self.df = ElectricityMarketCurvesDataframe(path)
+        self.solved_df = None
+        self.model = self.get_model()
         self.solver = po.SolverFactory('gurobi')
-        self.reset_lower_level()
 
-    def reset_lower_level(self):
+    def get_model(self):
         model = pe.ConcreteModel()
         
+        # Set dual
+        model.dual = pe.Suffix(direction=pe.Suffix.IMPORT)
+        
         # Sets
-        model.generators = pe.Set(initialize=[self.df.get]) # j
-        model.consumers = pe.Set(initialize=list(self.consumers_data)) # l
-        model.years = pe.Set(initialize=list(range(self.years))) # y
-        model.hours = pe.Set(initialize=list(range(24*365*self.years))) # t
+        model.generators = pe.Set(initialize=list(self.df.get_entities_name(True))) # j
+        model.consumers = pe.Set(initialize=list(self.df.get_entities_name(False))) # l
+        model.years = pe.Set(initialize=list(self.df.get_years())) # y
+        model.hours = pe.Set(initialize=list(self.df.get_hours())) # t
         
         # Parameters
         model.generator_marginal_cost = pe.Param(model.generators, 
@@ -58,38 +58,39 @@ class BilivelProblem():
 
         model.constraint_production_limit = pe.Constraint(model.generators, model.hours, rule=production_limit_rule)
 
-        # Set dual
-        model.dual = pe.Suffix(direction=pe.Suffix.IMPORT)
+        num_constraints = len(list(model.component_data_objects(pe.Constraint, active=True)))
+        num_variables = len(list(model.component_data_objects(pe.Var)))
+        print(f"Number of constraints: {num_constraints}")
+        print(f"Number of variables: {num_variables}")
 
-        self.model = model
-    
-    def get_dict_index(self, dictionary, key):
-        return {k: v[key] for k, v in dictionary.items()}
-    
-    def solve_lower_level(self):
-        result = self.solver.solve(self.model, tee=False)
-        market_price = self.model.dual[self.model.constraint_power_balance]
-        return result, market_price
-    
-    def upper_objective(self):
-
+        return model
     
     def solve(self):
+        self.solver.solve(self.model, tee=False)
 
-        return minimize(self.upper_objective,
-                        self.get_dict_index(self.own_generators_data, "cost"),
-                        method='Nelder-Mead',
-                        options={'maxiter': 15, 'disp':True})
+        # Get market prices (dual of power balance constraint)
+        market_price = {t: self.model.dual[self.model.constraint_power_balance[t]] for t in self.model.hours}
 
+        # Get taken for all entities (generators: production, consumers: consumption)
+        taken = {}
+        # Generators
+        for j in self.model.generators:
+            for t in self.model.hours:
+                taken[(j, t)] = pe.value(self.model.production[j, t])
+        # Consumers
+        for l in self.model.consumers:
+            for t in self.model.hours:
+                taken[(l, t)] = pe.value(self.model.consumption[l, t])
+
+        # Build solved dataframe
+        solved_df = ElectricityMarketSolvedDataframe(self.df, taken=taken, prices=market_price)
+        self.solved_df = solved_df
 
 def main():
-    path = "../data/curva_pbc_20251126.csv"
-    df = ElectricityMarketDataframe(path)
-    df.get_var_vector()
-    df.get_var_dict()
-
-    problem = BilivelProblem()
-
+    p = MarketClearingProblem()
+    p.solve()
+    p.solved_df.save_dataframe(SOLVED_CSV)
+    p.solved_df.save_market_plots(SOLVED_PLOTS)
 
 if __name__ == "__main__":
     main()
