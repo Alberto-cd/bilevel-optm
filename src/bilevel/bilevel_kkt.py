@@ -2,7 +2,7 @@ import pyomo.environ as pe
 import pyomo.opt as po
 
 from ..data import ElectricityMarketCurvesDataframe, ElectricityMarketSolvedDataframe
-from ..constants import MAIN_CSV, BILEVEL_SOLVED_CSV, BILEVEL_SOLVED_PLOTS
+from ..constants import MAIN_CSV, BILEVEL_SOLVED_CSV, BILEVEL_SOLVED_PLOTS, M_MARGIN_MULTIPLIER
 
 class StrategicOfferingProblem():
     def __init__(self, path:str=MAIN_CSV, ppa:bool=False, battery:bool=False):
@@ -37,9 +37,6 @@ class StrategicOfferingProblem():
         model.production = pe.Var(model.generators, model.hours, within = pe.NonNegativeReals)
         model.consumption = pe.Var(model.consumers, model.hours, within = pe.NonNegativeReals)
 
-        # Strategic offer variables for own generators
-        model.strategic_offer = pe.Var(model.own_generators, model.hours, within=pe.NonNegativeReals)
-
         # Duals for production bounds
         model.omega_q_min = pe.Var(model.generators, model.hours, within=pe.NonNegativeReals)  # for q_{j,t} >= 0
         model.omega_q_max = pe.Var(model.generators, model.hours, within=pe.NonNegativeReals)  # for q_{j,t} <= Q_{j,t}
@@ -59,7 +56,13 @@ class StrategicOfferingProblem():
 
         # --- Objective function (Strategic: maximize own generator revenue) ---
         def obj_rule(model):
-            return sum(sum(model.lambda_power_balance[t] * model.production[i, t] for i in model.own_generators) for t in model.hours)
+            # return sum(sum(model.lambda_power_balance[t] * model.production[i, t] for i in model.own_generators) for t in model.hours)
+            return sum(sum(model.generator_maximum_capacity[i, t] * model.omega_q_max[i, t] for i in model.own_generators) for t in model.hours)
+            # return sum( - sum(model.generator_marginal_cost[j, t] * model.production[j, t] for j in model.generators) 
+            #             + sum(model.demand_marginal_utility[l, t] * model.consumption[l, t] for l in model.consumers) 
+            #             - sum(model.z_d_max[l, t] * model.demand_maximum[l, t] for l in model.consumers) 
+            #             - sum(model.z_q_max[j, t] * model.generator_maximum_capacity[j, t] for j in model.external_generators) 
+            #            for t in model.hours)
 
         model.revenue = pe.Objective(rule = obj_rule, sense = pe.maximize)
         
@@ -70,12 +73,12 @@ class StrategicOfferingProblem():
         model.constraint_power_balance = pe.Constraint(model.hours, rule=power_balance_rule)
 
         def consumption_limit_rule(model, l, t):
-            return model.consumption[l, t] <= model.demand_maximum[l, t]
+            return model.demand_maximum[l, t] - model.consumption[l, t] >= 0
 
         model.constraint_consumption_limit = pe.Constraint(model.consumers, model.hours, rule=consumption_limit_rule)
 
         def production_limit_rule(model, j, t):
-            return model.production[j, t] <= model.generator_maximum_capacity[j, t]
+            return model.generator_maximum_capacity[j, t] - model.production[j, t] >= 0
 
         model.constraint_production_limit = pe.Constraint(model.generators, model.hours, rule=production_limit_rule)
 
@@ -84,71 +87,62 @@ class StrategicOfferingProblem():
         max_market_price = self.df.df['offer'].max()
         # Generators: lower bound
         def bigm_q_min_dual_rule(model, j, t):
-            m = max_market_price
-            return model.omega_q_min[j, t] <= m * model.z_q_min[j, t]
+            m = max_market_price * M_MARGIN_MULTIPLIER
+            return model.omega_q_min[j, t] <= m * (1 - model.z_q_min[j, t])
         model.bigm_q_min_dual = pe.Constraint(model.generators, model.hours, rule=bigm_q_min_dual_rule)
 
         def bigm_q_min_primal_rule(model, j, t):
-            m = model.generator_maximum_capacity[j, t]
-            return model.production[j, t] <= m * (1 - model.z_q_min[j, t])
+            m = model.generator_maximum_capacity[j, t] * M_MARGIN_MULTIPLIER
+            return model.production[j, t] <= m * model.z_q_min[j, t]
         model.bigm_q_min_primal = pe.Constraint(model.generators, model.hours, rule=bigm_q_min_primal_rule)
 
         # Generators: upper bound
         def bigm_q_max_dual_rule(model, j, t):
-            m = max_market_price
-            return model.omega_q_max[j, t] <= m * model.z_q_max[j, t]
+            m = max_market_price * M_MARGIN_MULTIPLIER
+            return model.omega_q_max[j, t] <= m * (1 - model.z_q_max[j, t])
         model.bigm_q_max_dual = pe.Constraint(model.generators, model.hours, rule=bigm_q_max_dual_rule)
 
         def bigm_q_max_primal_rule(model, j, t):
-            m = model.generator_maximum_capacity[j, t]
-            return model.generator_maximum_capacity[j, t] - model.production[j, t] <= m * (1 - model.z_q_max[j, t])
+            m = model.generator_maximum_capacity[j, t] * M_MARGIN_MULTIPLIER
+            return model.generator_maximum_capacity[j, t] - model.production[j, t] <= m * model.z_q_max[j, t]
         model.bigm_q_max_primal = pe.Constraint(model.generators, model.hours, rule=bigm_q_max_primal_rule)
 
         # Demand: lower bound
         def bigm_d_min_dual_rule(model, l, t):
-            m = max_market_price
-            return model.omega_d_min[l, t] <= m * model.z_d_min[l, t]
+            m = max_market_price * M_MARGIN_MULTIPLIER
+            return model.omega_d_min[l, t] <= m * (1 - model.z_d_min[l, t])
         model.bigm_d_min_dual = pe.Constraint(model.consumers, model.hours, rule=bigm_d_min_dual_rule)
 
         def bigm_d_min_primal_rule(model, l, t):
-            m = model.demand_maximum[l, t]
-            return model.consumption[l, t] <= m * (1 - model.z_d_min[l, t])
+            m = model.demand_maximum[l, t] * M_MARGIN_MULTIPLIER
+            return model.consumption[l, t] <= m * model.z_d_min[l, t]
         model.bigm_d_min_primal = pe.Constraint(model.consumers, model.hours, rule=bigm_d_min_primal_rule)
 
         # Demand: upper bound
         def bigm_d_max_dual_rule(model, l, t):
-            m = max_market_price
-            return model.omega_d_max[l, t] <= m * model.z_d_max[l, t]
+            m = max_market_price * M_MARGIN_MULTIPLIER
+            return model.omega_d_max[l, t] <= m * (1 - model.z_d_max[l, t])
         model.bigm_d_max_dual = pe.Constraint(model.consumers, model.hours, rule=bigm_d_max_dual_rule)
 
         def bigm_d_max_primal_rule(model, l, t):
-            m = model.demand_maximum[l, t]
-            return model.demand_maximum[l, t] - model.consumption[l, t] <= m * (1 - model.z_d_max[l, t])
+            m = model.demand_maximum[l, t] * M_MARGIN_MULTIPLIER
+            return model.demand_maximum[l, t] - model.consumption[l, t] <= m * model.z_d_max[l, t]
         model.bigm_d_max_primal = pe.Constraint(model.consumers, model.hours, rule=bigm_d_max_primal_rule)
 
         # *** Stationarity constraints ***
-        # For own generators: use strategic offer variable
-        def stationarity_own_production_rule(model, i, t):
-            return (-model.strategic_offer[i, t]
-                + model.lambda_power_balance[t]
-                - model.omega_q_min[i, t]
-                + model.omega_q_max[i, t]
-                == 0)
-        model.stationarity_own_production = pe.Constraint(model.own_generators, model.hours, rule=stationarity_own_production_rule)
-
-        # For external generators: use fixed marginal cost parameter
-        def stationarity_external_production_rule(model, j, t):
-            return (-model.generator_marginal_cost[j, t]
-                + model.lambda_power_balance[t]
+        # For all generators and hours
+        def stationarity_production_rule(model, j, t):
+            return (model.generator_marginal_cost[j, t]
+                - model.lambda_power_balance[t]
                 - model.omega_q_min[j, t]
                 + model.omega_q_max[j, t]
                 == 0)
-        model.stationarity_external_production = pe.Constraint(model.external_generators, model.hours, rule=stationarity_external_production_rule)
+        model.stationarity_production = pe.Constraint(model.generators, model.hours, rule=stationarity_production_rule)
 
-        # For all consumers and hours: beta_{l,t} - lambda_t - omega^{d,min}_{l,t} + omega^{d,max}_{l,t} = 0
+        # For all consumers and hours
         def stationarity_consumption_rule(model, l, t):
-            return (model.demand_marginal_utility[l, t]
-                - model.lambda_power_balance[t] # TODO: ensure that it is the market price
+            return (-model.demand_marginal_utility[l, t]
+                + model.lambda_power_balance[t]
                 - model.omega_d_min[l, t]
                 + model.omega_d_max[l, t]
                 == 0)
@@ -162,7 +156,11 @@ class StrategicOfferingProblem():
         return model
     
     def solve(self):
-        self.solver.solve(self.model, tee=True)
+        res = self.solver.solve(self.model, tee=True)
+
+        if res.solver.status != 'ok':
+            print("As the model was not solved, the result dataframe was not set.")
+            return
 
         # Get market prices from lambda_power_balance variable
         market_price = {t: pe.value(self.model.lambda_power_balance[t]) for t in self.model.hours}
@@ -178,21 +176,27 @@ class StrategicOfferingProblem():
             for t in self.model.hours:
                 taken[(l, t)] = pe.value(self.model.consumption[l, t])
 
-        # Update the offer of own generators in the dataframe
-        for i in self.model.own_generators:
-            for t in self.model.hours:
-                # Update the 'offer' column for own generators at each hour
-                self.df.df.loc[(self.df.df['entity'] == i) & (self.df.df['hour'] == t), 'offer'] = pe.value(self.model.strategic_offer[i, t])
-
         # Build solved dataframe
         solved_df = ElectricityMarketSolvedDataframe(self.df, taken=taken, prices=market_price)
         self.solved_df = solved_df
+    
+    def save_dataframe(self, *args):
+        if self.solved_df is None:
+            print("Unable to save dataframe: Dataframe not set.")
+            return
+        self.solved_df.save_dataframe(*args)
+
+    def save_market_plots(self, **kwargs):
+        if self.solved_df is None:
+            print("Unable to save market plots: Dataframe not set.")
+            return
+        self.solved_df.save_market_plots(**kwargs)
 
 def main():
     p = StrategicOfferingProblem()
     p.solve()
-    p.solved_df.save_dataframe(BILEVEL_SOLVED_CSV)
-    p.solved_df.save_market_plots(BILEVEL_SOLVED_PLOTS)
+    p.save_dataframe(BILEVEL_SOLVED_CSV)
+    p.save_market_plots(output_dir=BILEVEL_SOLVED_PLOTS, show_dashed_lines=True)
 
 if __name__ == "__main__":
     main()

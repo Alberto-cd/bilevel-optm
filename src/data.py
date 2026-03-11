@@ -168,12 +168,20 @@ class ElectricityMarketSolvedDataframe(ElectricityMarketCurvesDataframe):
             self.df["price"] = 0.0
 
     def save_dataframe(self, path: str, decimals: None | int = None):
+        if self.df is None:
+            print("Unable to save dataframe: Dataframe not set.")
+            return
+        
         df = self.df.copy()
         if decimals is not None:
             df = df.round(decimals)
         df.to_csv(path, index=False)
     
-    def save_market_plots(self, output_dir: str = "market_plots", limit=24):
+    def save_market_plots(self, output_dir: str = "market_plots", limit=24, show_dashed_lines:bool = False):
+        if self.df is None:
+            print("Unable to save market plots: Dataframe not set.")
+            return
+        
         os.makedirs(output_dir, exist_ok=True)
 
         hours = list(self.df["hour"].unique())[:limit] if limit is not None else list(self.df["hour"].unique())
@@ -228,10 +236,11 @@ class ElectricityMarketSolvedDataframe(ElectricityMarketCurvesDataframe):
             market_price = df_hour["price"].iloc[0]
             supplied_demand = demand_data["taken"].sum()
             
-            plt.axhline(y=market_price, xmax=supplied_demand/max_quantity, 
-                       color="orange", linestyle="--", linewidth=2, label=f"Market Price: {market_price:.2f}")
-            plt.axvline(x=supplied_demand, ymax=market_price/max_price, 
-                       color="magenta", linestyle="--", linewidth=2)
+            if show_dashed_lines:
+                plt.axhline(y=market_price, xmax=supplied_demand/max_quantity, 
+                        color="orange", linestyle="--", linewidth=2, label=f"Market Price: {market_price:.2f}")
+                plt.axvline(x=supplied_demand, ymax=market_price/max_price, 
+                        color="magenta", linestyle="--", linewidth=2)
 
             # Set plot limits and labels
             min_price = min((demands_info[-1][1] if demands_info else 0),
@@ -249,8 +258,9 @@ class ElectricityMarketSolvedDataframe(ElectricityMarketCurvesDataframe):
                 legend_elements.append(Line2D([0], [0], color='green', lw=2, label='Own Generators'))
             if len(ext_gen_info) > 0:
                 legend_elements.append(Line2D([0], [0], color='red', lw=2, label='External Generators'))
-            legend_elements.append(Line2D([0], [0], color='orange', lw=2, linestyle='--', label=f'Market Price: {market_price:.2f}'))
-            legend_elements.append(Line2D([0], [0], color='magenta', lw=2, linestyle='--', label=f'Supplied Quantity: {supplied_demand:.2f}'))
+            if show_dashed_lines:
+                legend_elements.append(Line2D([0], [0], color='orange', lw=2, linestyle='--', label=f'Market Price: {market_price:.2f}'))
+                legend_elements.append(Line2D([0], [0], color='magenta', lw=2, linestyle='--', label=f'Supplied Quantity: {supplied_demand:.2f}'))
             plt.legend(handles=legend_elements)
             plt.grid(True, alpha=0.3)
 
