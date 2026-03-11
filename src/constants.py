@@ -7,3 +7,4 @@ SOLVED_PLOTS = "images/market_plots"
 BILEVEL_SOLVED_CSV = "data/bilevel_solved_estimations_2030.csv"
 BILEVEL_SOLVED_PLOTS = "images/bilevel_market_plots"
 M_MARGIN_MULTIPLIER = 1.2
+PPA_PRICE = 100

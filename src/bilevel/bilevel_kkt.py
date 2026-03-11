@@ -191,12 +191,19 @@ class StrategicOfferingProblem():
             print("Unable to save market plots: Dataframe not set.")
             return
         self.solved_df.save_market_plots(**kwargs)
+    
+    def save_monotone_price_curve(self, output_path: str = "monotone_price_curve.png"):
+        if self.df is None:
+            print("Unable to save monotone price curve: Dataframe not set.")
+            return
+        self.solved_df.save_monotone_price_curve(output_path)
 
 def main():
     p = StrategicOfferingProblem()
     p.solve()
     p.save_dataframe(BILEVEL_SOLVED_CSV)
     p.save_market_plots(output_dir=BILEVEL_SOLVED_PLOTS, show_dashed_lines=True)
+    p.save_monotone_price_curve(output_path=BILEVEL_SOLVED_PLOTS)
 
 if __name__ == "__main__":
     main()

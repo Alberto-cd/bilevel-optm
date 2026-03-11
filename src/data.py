@@ -268,6 +268,30 @@ class ElectricityMarketSolvedDataframe(ElectricityMarketCurvesDataframe):
             plot_path = os.path.join(output_dir, f"market_hour_{hour}.png")
             plt.savefig(plot_path, dpi=300, bbox_inches="tight")
             plt.close()
+    
+    def save_monotone_price_curve(self, output_dir: str):
+        if self.df is None:
+            print("Unable to save monotone price curve: Dataframe not set.")
+            return
+        os.makedirs(output_dir, exist_ok=True)
+        # Use only rows with valid market price and taken quantity
+        df_valid = self.df[(self.df["price"] > 0) & (self.df["taken"] > 0)]
+        # Group by hour, sum taken per hour, get market price per hour
+        grouped = df_valid.groupby("hour").agg({"price": "first", "taken": "sum"}).reset_index()
+        # Sort by market price descending
+        sorted_grouped = grouped.sort_values(by="price", ascending=False)
+        # Compute cumulative quantity
+        sorted_grouped["cum_quantity"] = sorted_grouped["taken"].cumsum()
+        # Plot monotone curve
+        plt.figure(figsize=(10, 6))
+        plt.step(sorted_grouped["cum_quantity"], sorted_grouped["price"], where="post", color="purple", linewidth=2)
+        plt.xlabel("Cumulative Quantity (MWh)")
+        plt.ylabel("Market Price (€/MWh)")
+        plt.title("Monotone Market Price Curve (Year)")
+        plt.grid(True, alpha=0.3)
+        output_path = os.path.join(output_dir, "monotone_price_curve.png")
+        plt.savefig(output_path, dpi=300, bbox_inches="tight")
+        plt.close()
 
 
 def main():
