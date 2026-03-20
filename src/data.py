@@ -168,6 +168,7 @@ class ElectricityMarketSolvedDataframe(ElectricityMarketCurvesDataframe):
             self.df["price"] = 0.0
         # Change own generators limit to account for the ppa percentage
         if ppa_percentage > 0.0:
+            self.df["limit"] = self.df["limit"].astype(float)
             own_mask = (self.df["is_generator"]) & (self.df["own"])
             self.df.loc[own_mask, "limit"] = self.df.loc[own_mask, "limit"] * (1 - ppa_percentage)
 
