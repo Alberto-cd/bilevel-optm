@@ -62,18 +62,25 @@ class StrategicOfferingProblem():
 
         # --- Objective function (Strategic: maximize own generator revenue) ---
         def obj_rule(model):
+            # No lineal version
+            # obj = sum(sum((model.lambda_power_balance[t] - model.generator_marginal_cost[i, t]) * model.production[i, t] for i in model.own_generators) for t in model.hours)
+
+            # Simplification given that the marginal cost is not a variable (keep in mind the generator_marginal_cost, as in the video the costs and the offer were different)
+            # obj = sum(sum(model.generator_maximum_capacity[i, t] * model.omega_q_max[i, t] for i in model.own_generators) for t in model.hours)
+
+            # Complete video linealization (keep in mind the generator_marginal_cost, as in the video the costs and the offer were different)
+            obj = sum(- sum(model.generator_marginal_cost[j, t] * model.production[j, t] for j in model.generators) 
+                    + sum(model.demand_marginal_utility[l, t] * model.consumption[l, t] for l in model.consumers) 
+                    - sum(model.z_d_max[l, t] * model.demand_maximum[l, t] for l in model.consumers) 
+                    - sum(model.z_q_max[j, t] * model.generator_maximum_capacity[j, t] for j in model.external_generators) 
+                    for t in model.hours)
+            
             if self.ppa:
-                return sum(sum(model.generator_maximum_capacity[i, t] * model.omega_q_max[i, t] 
-                               + (PPA_PRICE - model.generator_marginal_cost[i, t])*model.ppa_percentage*model.generator_maximum_capacity[i, t]
+                obj += sum(sum((PPA_PRICE - model.generator_marginal_cost[i, t])*model.ppa_percentage*model.generator_maximum_capacity[i, t]
                                for i in model.own_generators) 
                            for t in model.hours)
-            # return sum(sum(model.lambda_power_balance[t] * model.production[i, t] for i in model.own_generators) for t in model.hours)
-            return sum(sum(model.generator_maximum_capacity[i, t] * model.omega_q_max[i, t] for i in model.own_generators) for t in model.hours)
-            # return sum( - sum(model.generator_marginal_cost[j, t] * model.production[j, t] for j in model.generators) 
-            #             + sum(model.demand_marginal_utility[l, t] * model.consumption[l, t] for l in model.consumers) 
-            #             - sum(model.z_d_max[l, t] * model.demand_maximum[l, t] for l in model.consumers) 
-            #             - sum(model.z_q_max[j, t] * model.generator_maximum_capacity[j, t] for j in model.external_generators) 
-            #            for t in model.hours)
+            
+            return obj
 
         model.revenue = pe.Objective(rule = obj_rule, sense = pe.maximize)
         
