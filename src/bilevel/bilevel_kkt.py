@@ -1,18 +1,19 @@
 import pyomo.environ as pe
 import pyomo.opt as po
+import os
 
 from ..data import ElectricityMarketCurvesDataframe, ElectricityMarketSolvedDataframe
-from ..constants import MAIN_CSV, BILEVEL_SOLVED_CSV, BILEVEL_SOLVED_PLOTS, M_MARGIN_MULTIPLIER
+from ..constants import ESTIMATIONS_DIR_PATH, ESTIMATIONS_TO_SOLVE, SOLVED_ESTIMATIONS_DIR_PATH, IMAGES_DIR_PATH, M_MARGIN_MULTIPLIER, PPA_PRICE
 
 class StrategicOfferingProblem():
-    def __init__(self, path:str=MAIN_CSV, ppa:bool=False, battery:bool=False):
+    def __init__(self, path:str, ppa:bool=False, battery:bool=False):
+        self.ppa = ppa
+        self.battery = battery
+
         self.df = ElectricityMarketCurvesDataframe(path)
         self.solved_df = None
         self.model = self.get_model()
         self.solver = po.SolverFactory('gurobi')
-
-        self.ppa = ppa
-        self.battery = battery
 
     def get_model(self):
         model = pe.ConcreteModel()
@@ -32,6 +33,7 @@ class StrategicOfferingProblem():
         model.generator_maximum_capacity = pe.Param(model.generators, model.hours, default=0, initialize=self.df.get_entities_column_dict("limit", True))
         model.demand_marginal_utility = pe.Param(model.consumers, model.hours, default=0, initialize=self.df.get_entities_column_dict("offer", False))
         model.demand_maximum = pe.Param(model.consumers, model.hours, default=0, initialize=self.df.get_entities_column_dict("limit", False))
+        # PPA_PRICE from constants
 
         # --- Variables ---
         model.production = pe.Var(model.generators, model.hours, within = pe.NonNegativeReals)
@@ -54,8 +56,17 @@ class StrategicOfferingProblem():
         model.z_d_min = pe.Var(model.consumers, model.hours, within=pe.Binary)
         model.z_d_max = pe.Var(model.consumers, model.hours, within=pe.Binary)
 
+        if self.ppa:
+            # PPA variable
+            model.ppa_percentage = pe.Var(within=pe.NonNegativeReals)
+
         # --- Objective function (Strategic: maximize own generator revenue) ---
         def obj_rule(model):
+            if self.ppa:
+                return sum(sum(model.generator_maximum_capacity[i, t] * model.omega_q_max[i, t] 
+                               + (PPA_PRICE - model.generator_marginal_cost[i, t])*model.ppa_percentage*model.generator_maximum_capacity[i, t]
+                               for i in model.own_generators) 
+                           for t in model.hours)
             # return sum(sum(model.lambda_power_balance[t] * model.production[i, t] for i in model.own_generators) for t in model.hours)
             return sum(sum(model.generator_maximum_capacity[i, t] * model.omega_q_max[i, t] for i in model.own_generators) for t in model.hours)
             # return sum( - sum(model.generator_marginal_cost[j, t] * model.production[j, t] for j in model.generators) 
@@ -78,7 +89,10 @@ class StrategicOfferingProblem():
         model.constraint_consumption_limit = pe.Constraint(model.consumers, model.hours, rule=consumption_limit_rule)
 
         def production_limit_rule(model, j, t):
-            return model.generator_maximum_capacity[j, t] - model.production[j, t] >= 0
+            if self.ppa and j in model.own_generators:
+                return model.generator_maximum_capacity[j, t] * (1 - model.ppa_percentage) - model.production[j, t] >= 0
+            else:
+                return model.generator_maximum_capacity[j, t] - model.production[j, t] >= 0
 
         model.constraint_production_limit = pe.Constraint(model.generators, model.hours, rule=production_limit_rule)
 
@@ -104,7 +118,10 @@ class StrategicOfferingProblem():
 
         def bigm_q_max_primal_rule(model, j, t):
             m = model.generator_maximum_capacity[j, t] * M_MARGIN_MULTIPLIER
-            return model.generator_maximum_capacity[j, t] - model.production[j, t] <= m * model.z_q_max[j, t]
+            if self.ppa and j in model.own_generators:
+                return model.generator_maximum_capacity[j, t] * (1 - model.ppa_percentage) - model.production[j, t] <= m * model.z_q_max[j, t]
+            else:
+                return model.generator_maximum_capacity[j, t] - model.production[j, t] <= m * model.z_q_max[j, t]
         model.bigm_q_max_primal = pe.Constraint(model.generators, model.hours, rule=bigm_q_max_primal_rule)
 
         # Demand: lower bound
@@ -148,6 +165,12 @@ class StrategicOfferingProblem():
                 == 0)
         model.stationarity_consumption = pe.Constraint(model.consumers, model.hours, rule=stationarity_consumption_rule)
 
+        if self.ppa:
+            # PPA percentage upper bound
+            def ppa_upper_bound_rule(model):
+                return model.ppa_percentage <= 1
+            model.ppa_upper_bound = pe.Constraint(rule=ppa_upper_bound_rule)
+
         num_constraints = len(list(model.component_data_objects(pe.Constraint, active=True)))
         num_variables = len(list(model.component_data_objects(pe.Var)))
         print(f"Number of constraints: {num_constraints}")
@@ -161,6 +184,9 @@ class StrategicOfferingProblem():
         if res.solver.status != 'ok':
             print("As the model was not solved, the result dataframe was not set.")
             return
+        
+        ppa_percentage = pe.value(self.model.ppa_percentage) if self.ppa else 0.0
+        print(f"PPA percentage: {ppa_percentage}")
 
         # Get market prices from lambda_power_balance variable
         market_price = {t: pe.value(self.model.lambda_power_balance[t]) for t in self.model.hours}
@@ -177,7 +203,7 @@ class StrategicOfferingProblem():
                 taken[(l, t)] = pe.value(self.model.consumption[l, t])
 
         # Build solved dataframe
-        solved_df = ElectricityMarketSolvedDataframe(self.df, taken=taken, prices=market_price)
+        solved_df = ElectricityMarketSolvedDataframe(self.df, taken=taken, prices=market_price, ppa_percentage=ppa_percentage)
         self.solved_df = solved_df
     
     def save_dataframe(self, *args):
@@ -192,18 +218,29 @@ class StrategicOfferingProblem():
             return
         self.solved_df.save_market_plots(**kwargs)
     
-    def save_monotone_price_curve(self, output_path: str = "monotone_price_curve.png"):
+    def save_monotone_price_curve(self, output_dir):
         if self.df is None:
             print("Unable to save monotone price curve: Dataframe not set.")
             return
-        self.solved_df.save_monotone_price_curve(output_path)
+        self.solved_df.save_monotone_price_curve(output_dir)
 
-def main():
-    p = StrategicOfferingProblem()
+def main(ppa:bool=False, battery:bool=False):
+    os.makedirs(ESTIMATIONS_DIR_PATH, exist_ok=True)
+    path = os.path.join(ESTIMATIONS_DIR_PATH, f"{ESTIMATIONS_TO_SOLVE['name']}.csv")
+    p = StrategicOfferingProblem(path, ppa=ppa, battery=battery)
     p.solve()
-    p.save_dataframe(BILEVEL_SOLVED_CSV)
-    p.save_market_plots(output_dir=BILEVEL_SOLVED_PLOTS, show_dashed_lines=True)
-    p.save_monotone_price_curve(output_path=BILEVEL_SOLVED_PLOTS)
+
+    problem_name = f"bilevel{'_' + 'ppa' if p.ppa else ''}{'_' + 'battery' if p.battery else ''}"
+
+    solved_dir = os.path.join(SOLVED_ESTIMATIONS_DIR_PATH, ESTIMATIONS_TO_SOLVE["name"])
+    os.makedirs(solved_dir, exist_ok=True)
+    solved_path = os.path.join(solved_dir, f"{problem_name}.csv")
+    p.save_dataframe(solved_path)
+
+    images_dir = os.path.join(IMAGES_DIR_PATH, ESTIMATIONS_TO_SOLVE["name"], problem_name)
+    os.makedirs(images_dir, exist_ok=True)
+    p.save_market_plots(output_dir=images_dir, show_dashed_lines=True)
+    p.save_monotone_price_curve(output_dir=images_dir)
 
 if __name__ == "__main__":
     main()

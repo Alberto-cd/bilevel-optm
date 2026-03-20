@@ -1,11 +1,12 @@
 import pyomo.environ as pe
 import pyomo.opt as po
+import os
 
 from ..data import ElectricityMarketCurvesDataframe, ElectricityMarketSolvedDataframe
-from ..constants import MAIN_CSV, SOLVED_CSV, SOLVED_PLOTS
+from ..constants import ESTIMATIONS_DIR_PATH, ESTIMATIONS_TO_SOLVE, SOLVED_ESTIMATIONS_DIR_PATH, IMAGES_DIR_PATH
 
 class MarketClearingProblem():
-    def __init__(self, path:str=MAIN_CSV):
+    def __init__(self, path:str):
         self.df = ElectricityMarketCurvesDataframe(path)
         self.solved_df = None
         self.model = self.get_model()
@@ -87,10 +88,20 @@ class MarketClearingProblem():
         self.solved_df = solved_df
 
 def main():
-    p = MarketClearingProblem()
+    os.makedirs(ESTIMATIONS_DIR_PATH, exist_ok=True)
+    path = os.path.join(ESTIMATIONS_DIR_PATH, f"{ESTIMATIONS_TO_SOLVE['name']}.csv")
+    p = MarketClearingProblem(path)
     p.solve()
-    p.solved_df.save_dataframe(SOLVED_CSV)
-    p.solved_df.save_market_plots(SOLVED_PLOTS)
+    
+    solved_dir = os.path.join(SOLVED_ESTIMATIONS_DIR_PATH, ESTIMATIONS_TO_SOLVE["name"])
+    os.makedirs(solved_dir, exist_ok=True)
+    solved_path = os.path.join(solved_dir, "market.csv")
+    p.solved_df.save_dataframe(solved_path)
+
+    images_dir = os.path.join(IMAGES_DIR_PATH, ESTIMATIONS_TO_SOLVE["name"], "market")
+    os.makedirs(images_dir, exist_ok=True)
+    p.solved_df.save_market_plots(images_dir, show_dashed_lines=True)
+    p.solved_df.save_monotone_price_curve(output_dir=images_dir)
 
 if __name__ == "__main__":
     main()

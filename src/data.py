@@ -5,10 +5,10 @@ import os
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-from .constants import BASE_MARKET_ESTIMATIONS_PATH, MARKET_PROFILE_PATH, MAIN_CSV
+from .constants import ESTIMATIONS_TO_CREATE
 
 class DataProcessor():
-    def __init__(self, json_path: str = BASE_MARKET_ESTIMATIONS_PATH, csv_path: str = MARKET_PROFILE_PATH, percent:float=0.2):
+    def __init__(self, json_path: str, csv_path: str, percent:float=0.2):
         self.percent = percent
         gen_est, gen_prices, dem_est, dem_prices = self._get_market_curves_estimations(json_path, csv_path)
         self.dataframe: pd.DataFrame = self._combine_dataframes(gen_est, gen_prices, dem_est, dem_prices)
@@ -42,7 +42,7 @@ class DataProcessor():
 
         return estimations, prices
 
-    def _get_market_curves_estimations(self, json_path: str = BASE_MARKET_ESTIMATIONS_PATH, csv_path: str = MARKET_PROFILE_PATH):
+    def _get_market_curves_estimations(self, json_path: str, csv_path: str):
         # Read data files
         with open(json_path, 'r') as file:
             market_estimations = json.load(file)
@@ -94,7 +94,7 @@ class DataProcessor():
         # Reorder and assign
         return combined_df[['is_generator', 'own', 'entity', 'years', 'hour', 'offer', 'limit']]
 
-    def save_dataframe(self, path:str=MAIN_CSV, decimals:None|int=None):
+    def save_dataframe(self, path:str, decimals:None|int=None):
         df = self.dataframe.copy()
         if decimals is not None:
             df = df.round(decimals)
@@ -150,7 +150,7 @@ class ElectricityMarketCurvesDataframe():
         return df
 
 class ElectricityMarketSolvedDataframe(ElectricityMarketCurvesDataframe):
-    def __init__(self, base_df: ElectricityMarketCurvesDataframe, taken: dict = None, prices: dict = None):
+    def __init__(self, base_df: ElectricityMarketCurvesDataframe, taken: dict = None, prices: dict = None, ppa_percentage: float = 0.0):
         # Copy base columns and add solved columns
         self.columns = base_df.columns + ["taken", "price"]
         # Copy base dataframe
@@ -166,6 +166,10 @@ class ElectricityMarketSolvedDataframe(ElectricityMarketCurvesDataframe):
             self.df["price"] = self.df["hour"].map(lambda h: prices.get(h, 0.0))
         else:
             self.df["price"] = 0.0
+        # Change own generators limit to account for the ppa percentage
+        if ppa_percentage > 0.0:
+            own_mask = (self.df["is_generator"]) & (self.df["own"])
+            self.df.loc[own_mask, "limit"] = self.df.loc[own_mask, "limit"] * (1 - ppa_percentage)
 
     def save_dataframe(self, path: str, decimals: None | int = None):
         if self.df is None:
@@ -195,7 +199,8 @@ class ElectricityMarketSolvedDataframe(ElectricityMarketCurvesDataframe):
 
             # Create bid/offer curves data
             demands_info = [[row["limit"], row["offer"]] for _, row in demand_data.iterrows()]
-            own_gen_info = [[row["limit"], row["offer"]] for _, row in own_gen_data.iterrows()]
+            own_gen_info = [[row["limit"], row["offer"]] for _, row in own_gen_data.iterrows() if row["limit"] > 0]
+            # own_gen_info = []
             ext_gen_info = [[row["limit"], row["offer"]] for _, row in ext_gen_data.iterrows()]
 
             # Sort data for plotting
@@ -295,8 +300,8 @@ class ElectricityMarketSolvedDataframe(ElectricityMarketCurvesDataframe):
 
 
 def main():
-    DataProcessor().save_dataframe(MAIN_CSV)
-    ElectricityMarketCurvesDataframe(MAIN_CSV)
+    DataProcessor(ESTIMATIONS_TO_CREATE["base_estimations"], ESTIMATIONS_TO_CREATE["profile"], ESTIMATIONS_TO_CREATE["percent"]).save_dataframe(ESTIMATIONS_TO_CREATE["final_path"])
+    ElectricityMarketCurvesDataframe(ESTIMATIONS_TO_CREATE["final_path"])
 
 if __name__ == "__main__":
     main()
