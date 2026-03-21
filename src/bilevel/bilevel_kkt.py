@@ -71,8 +71,8 @@ class StrategicOfferingProblem():
             # Complete video linealization (keep in mind the generator_marginal_cost, as in the video the costs and the offer were different)
             obj = sum(- sum(model.generator_marginal_cost[j, t] * model.production[j, t] for j in model.generators) 
                     + sum(model.demand_marginal_utility[l, t] * model.consumption[l, t] for l in model.consumers) 
-                    - sum(model.z_d_max[l, t] * model.demand_maximum[l, t] for l in model.consumers) 
-                    - sum(model.z_q_max[j, t] * model.generator_maximum_capacity[j, t] for j in model.external_generators) 
+                    - sum(model.omega_d_max[l, t] * model.demand_maximum[l, t] for l in model.consumers) 
+                    - sum(model.omega_q_max[j, t] * model.generator_maximum_capacity[j, t] for j in model.external_generators)
                     for t in model.hours)
             
             if self.ppa:
