@@ -3,11 +3,19 @@ import pyomo.opt as po
 import os
 
 from ..data import ElectricityMarketCurvesDataframe, ElectricityMarketSolvedDataframe
-from ..constants import ESTIMATIONS_DIR_PATH, ESTIMATIONS_TO_SOLVE, SOLVED_ESTIMATIONS_DIR_PATH, IMAGES_DIR_PATH
+from ..configuration import PathConfiguration
 
 class MarketClearingProblem():
-    def __init__(self, path:str):
+    def __init__(self, path: str, ppa_percentage: float = 0.0):
+        # Load base dataframe
         self.df = ElectricityMarketCurvesDataframe(path)
+        # If a PPA percentage is provided, reduce own generators' limits before building the model
+        if ppa_percentage and ppa_percentage > 0.0:
+            self.df.df = self.df.df.copy()
+            self.df.df["limit"] = self.df.df["limit"].astype(float)
+            own_mask = (self.df.df["is_generator"]) & (self.df.df["own"])
+            self.df.df.loc[own_mask, "limit"] = self.df.df.loc[own_mask, "limit"] * (1 - float(ppa_percentage))
+
         self.solved_df = None
         self.model = self.get_model()
         self.solver = po.SolverFactory('gurobi')
@@ -83,25 +91,59 @@ class MarketClearingProblem():
             for t in self.model.hours:
                 taken[(l, t)] = pe.value(self.model.consumption[l, t])
 
-        # Build solved dataframe
+        # Store raw results so caller can re-create solved dataframe with different ppa percentages
+        self.taken = taken
+        self.market_price = market_price
+
+        # Default solved dataframe without PPA reduction applied
         solved_df = ElectricityMarketSolvedDataframe(self.df, taken=taken, prices=market_price)
         self.solved_df = solved_df
 
-def main():
-    os.makedirs(ESTIMATIONS_DIR_PATH, exist_ok=True)
-    path = os.path.join(ESTIMATIONS_DIR_PATH, f"{ESTIMATIONS_TO_SOLVE['name']}.csv")
-    p = MarketClearingProblem(path)
-    p.solve()
-    
-    solved_dir = os.path.join(SOLVED_ESTIMATIONS_DIR_PATH, ESTIMATIONS_TO_SOLVE["name"])
-    os.makedirs(solved_dir, exist_ok=True)
-    solved_path = os.path.join(solved_dir, "market.csv")
-    p.solved_df.save_dataframe(solved_path)
+def _check_market_files_exist(solved_path: str) -> bool:
+    """Check if the market output files already exist."""
+    return os.path.exists(solved_path)
 
-    images_dir = os.path.join(IMAGES_DIR_PATH, ESTIMATIONS_TO_SOLVE["name"], "market")
-    os.makedirs(images_dir, exist_ok=True)
-    p.solved_df.save_market_plots(images_dir, show_dashed_lines=True)
-    p.solved_df.save_monotone_price_curve(output_dir=images_dir)
+def main(estimation_name: str, solar_percent: float = 0.0, ppa_percent=0.0, update: bool = True):
+    # Handle list-type solar_percent parameter (iterate over solar percentages)
+    if isinstance(solar_percent, (list, tuple)):
+        for solar in solar_percent:
+            main(estimation_name=estimation_name, solar_percent=solar, ppa_percent=ppa_percent, update=update)
+        return
+    
+    # Handle list-type ppa_percent parameter (iterate over ppa percentages)
+    if isinstance(ppa_percent, (list, tuple)):
+        for ppa in ppa_percent:
+            main(estimation_name=estimation_name, solar_percent=solar_percent, ppa_percent=ppa, update=update)
+        return
+    
+    # Single scalar values - do the actual computation
+    percent_name = f"solar_{int(solar_percent*100)}"
+    path = os.path.join(PathConfiguration.ESTIMATIONS_DIR_PATH, estimation_name, f"{percent_name}.csv")
+
+    scalar_ppa = float(ppa_percent) if ppa_percent else 0.0
+    ppa_name = f"ppa_{int(scalar_ppa*100)}"
+    
+    # Hierarchical solved and images directories
+    solved_dir = os.path.join(PathConfiguration.SOLVED_ESTIMATIONS_DIR_PATH, estimation_name, percent_name, "market", ppa_name)
+    solved_path = os.path.join(solved_dir, "market.csv")
+    
+    # Check if files already exist and update flag is False
+    if not update and _check_market_files_exist(solved_path):
+        print(f"Skipping (already exists): solar={int(solar_percent*100)}% ppa={int(scalar_ppa*100)}%")
+        return
+    
+    print(f"Computing: solar={int(solar_percent*100)}% ppa={int(scalar_ppa*100)}%")
+    
+    # Build and solve the market with own-generator limits reduced by the PPA percentage
+    p = MarketClearingProblem(path, ppa_percentage=scalar_ppa)
+    p.solve()
+
+    # Solved dataframe already reflects the reduced limits (constructed from p.df)
+    solved_df = ElectricityMarketSolvedDataframe(p.df, taken=p.taken, prices=p.market_price)
+
+    # Save solved dataframe
+    os.makedirs(solved_dir, exist_ok=True)
+    solved_df.save_dataframe(solved_path)
 
 if __name__ == "__main__":
     main()

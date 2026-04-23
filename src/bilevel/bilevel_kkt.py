@@ -1,19 +1,33 @@
 import pyomo.environ as pe
 import pyomo.opt as po
 import os
+import json
+import time
 
 from ..data import ElectricityMarketCurvesDataframe, ElectricityMarketSolvedDataframe
-from ..constants import ESTIMATIONS_DIR_PATH, ESTIMATIONS_TO_SOLVE, SOLVED_ESTIMATIONS_DIR_PATH, IMAGES_DIR_PATH, M_MARGIN_MULTIPLIER, PPA_PRICE
+from ..configuration import PathConfiguration, ExecutionConfiguration
 
 class StrategicOfferingProblem():
-    def __init__(self, path:str, ppa:bool=False, battery:bool=False):
-        self.ppa = ppa
+    def __init__(self, path:str, ppa_price:float|int|None=None, battery:bool=False, solver_timeout:int=None, m_margin_multiplier:float=None):
+        self.ppa_price = ppa_price
+        self.ppa = ppa_price is not None
         self.battery = battery
+        
+        # Use provided values or fall back to ExecutionConfiguration defaults
+        if solver_timeout is None:
+            solver_timeout = ExecutionConfiguration.SOLVER_TIMEOUT_SECONDS
+        if m_margin_multiplier is None:
+            m_margin_multiplier = ExecutionConfiguration.M_MARGIN_MULTIPLIER
+        
+        self.solver_timeout = solver_timeout
+        self.m_margin_multiplier = m_margin_multiplier
 
         self.df = ElectricityMarketCurvesDataframe(path)
         self.solved_df = None
         self.model = self.get_model()
         self.solver = po.SolverFactory('gurobi')
+        self.solver.options['timelimit'] = self.solver_timeout
+        self.results_info = {}
 
     def get_model(self):
         model = pe.ConcreteModel()
@@ -76,7 +90,7 @@ class StrategicOfferingProblem():
                     for t in model.hours)
             
             if self.ppa:
-                obj += sum(sum((PPA_PRICE - model.generator_marginal_cost[i, t])*model.ppa_percentage*model.generator_maximum_capacity[i, t]
+                obj += sum(sum((self.ppa_price - model.generator_marginal_cost[i, t])*model.ppa_percentage*model.generator_maximum_capacity[i, t]
                                for i in model.own_generators) 
                            for t in model.hours)
             
@@ -108,23 +122,23 @@ class StrategicOfferingProblem():
         max_market_price = self.df.df['offer'].max()
         # Generators: lower bound
         def bigm_q_min_dual_rule(model, j, t):
-            m = max_market_price * M_MARGIN_MULTIPLIER
+            m = max_market_price * self.m_margin_multiplier
             return model.omega_q_min[j, t] <= m * (1 - model.z_q_min[j, t])
         model.bigm_q_min_dual = pe.Constraint(model.generators, model.hours, rule=bigm_q_min_dual_rule)
 
         def bigm_q_min_primal_rule(model, j, t):
-            m = model.generator_maximum_capacity[j, t] * M_MARGIN_MULTIPLIER
+            m = model.generator_maximum_capacity[j, t] * self.m_margin_multiplier
             return model.production[j, t] <= m * model.z_q_min[j, t]
         model.bigm_q_min_primal = pe.Constraint(model.generators, model.hours, rule=bigm_q_min_primal_rule)
 
         # Generators: upper bound
         def bigm_q_max_dual_rule(model, j, t):
-            m = max_market_price * M_MARGIN_MULTIPLIER
+            m = max_market_price * self.m_margin_multiplier
             return model.omega_q_max[j, t] <= m * (1 - model.z_q_max[j, t])
         model.bigm_q_max_dual = pe.Constraint(model.generators, model.hours, rule=bigm_q_max_dual_rule)
 
         def bigm_q_max_primal_rule(model, j, t):
-            m = model.generator_maximum_capacity[j, t] * M_MARGIN_MULTIPLIER
+            m = model.generator_maximum_capacity[j, t] * self.m_margin_multiplier
             if self.ppa and j in model.own_generators:
                 return model.generator_maximum_capacity[j, t] * (1 - model.ppa_percentage) - model.production[j, t] <= m * model.z_q_max[j, t]
             else:
@@ -133,23 +147,23 @@ class StrategicOfferingProblem():
 
         # Demand: lower bound
         def bigm_d_min_dual_rule(model, l, t):
-            m = max_market_price * M_MARGIN_MULTIPLIER
+            m = max_market_price * self.m_margin_multiplier
             return model.omega_d_min[l, t] <= m * (1 - model.z_d_min[l, t])
         model.bigm_d_min_dual = pe.Constraint(model.consumers, model.hours, rule=bigm_d_min_dual_rule)
 
         def bigm_d_min_primal_rule(model, l, t):
-            m = model.demand_maximum[l, t] * M_MARGIN_MULTIPLIER
+            m = model.demand_maximum[l, t] * self.m_margin_multiplier
             return model.consumption[l, t] <= m * model.z_d_min[l, t]
         model.bigm_d_min_primal = pe.Constraint(model.consumers, model.hours, rule=bigm_d_min_primal_rule)
 
         # Demand: upper bound
         def bigm_d_max_dual_rule(model, l, t):
-            m = max_market_price * M_MARGIN_MULTIPLIER
+            m = max_market_price * self.m_margin_multiplier
             return model.omega_d_max[l, t] <= m * (1 - model.z_d_max[l, t])
         model.bigm_d_max_dual = pe.Constraint(model.consumers, model.hours, rule=bigm_d_max_dual_rule)
 
         def bigm_d_max_primal_rule(model, l, t):
-            m = model.demand_maximum[l, t] * M_MARGIN_MULTIPLIER
+            m = model.demand_maximum[l, t] * self.m_margin_multiplier
             return model.demand_maximum[l, t] - model.consumption[l, t] <= m * model.z_d_max[l, t]
         model.bigm_d_max_primal = pe.Constraint(model.consumers, model.hours, rule=bigm_d_max_primal_rule)
 
@@ -186,14 +200,36 @@ class StrategicOfferingProblem():
         return model
     
     def solve(self):
+        start_time = time.time()
         res = self.solver.solve(self.model, tee=True)
+        end_time = time.time()
 
-        if res.solver.status != 'ok':
-            print("As the model was not solved, the result dataframe was not set.")
+        # Check if we have a valid solution (either optimal or feasible if timed out)
+        feasible_conditions = [
+            po.TerminationCondition.optimal,
+            po.TerminationCondition.maxTimeLimit,
+            po.TerminationCondition.feasible
+        ]
+
+        if res.solver.termination_condition not in feasible_conditions:
+            print(f"Warning: Model not solved (Termination Condition: {res.solver.termination_condition}). Result dataframe not set.")
             return
         
         ppa_percentage = pe.value(self.model.ppa_percentage) if self.ppa else 0.0
+        profit = pe.value(self.model.revenue)
+        execution_time = end_time - start_time
+        
         print(f"PPA percentage: {ppa_percentage}")
+        print(f"Strategic Profit: {profit}")
+        print(f"Execution Time: {execution_time:.2f} s")
+
+        self.results_info = {
+            "ppa_percentage": ppa_percentage,
+            "strategic_profit": profit,
+            "execution_time_seconds": execution_time,
+            "solver_status": str(res.solver.status),
+            "solver_termination_condition": str(res.solver.termination_condition)
+        }
 
         # Get market prices from lambda_power_balance variable
         market_price = {t: pe.value(self.model.lambda_power_balance[t]) for t in self.model.hours}
@@ -219,6 +255,14 @@ class StrategicOfferingProblem():
             return
         self.solved_df.save_dataframe(*args)
 
+    def save_results_info(self, path: str):
+        if not self.results_info:
+            print("Unable to save results info: Info not set.")
+            return
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            json.dump(self.results_info, f, indent=4)
+
     def save_market_plots(self, **kwargs):
         if self.solved_df is None:
             print("Unable to save market plots: Dataframe not set.")
@@ -231,23 +275,46 @@ class StrategicOfferingProblem():
             return
         self.solved_df.save_monotone_price_curve(output_dir)
 
-def main(ppa:bool=False, battery:bool=False):
-    os.makedirs(ESTIMATIONS_DIR_PATH, exist_ok=True)
-    path = os.path.join(ESTIMATIONS_DIR_PATH, f"{ESTIMATIONS_TO_SOLVE['name']}.csv")
-    p = StrategicOfferingProblem(path, ppa=ppa, battery=battery)
+def _check_bilevel_files_exist(solved_path: str, info_path: str) -> bool:
+    """Check if the bilevel output files already exist."""
+    return os.path.exists(solved_path) and os.path.exists(info_path)
+
+def main(estimation_name: str, solar_percent: float = 0.0, ppa_price:float|int|None=None, battery:bool=False, update: bool = True):
+    # Handle list-type solar_percent parameter (iterate over solar percentages)
+    if isinstance(solar_percent, (list, tuple)):
+        for solar in solar_percent:
+            main(estimation_name=estimation_name, solar_percent=solar, ppa_price=ppa_price, battery=battery, update=update)
+        return
+    
+    # Handle list-type ppa_price parameter (iterate over prices)
+    if isinstance(ppa_price, (list, tuple)):
+        for price in ppa_price:
+            main(estimation_name=estimation_name, solar_percent=solar_percent, ppa_price=price, battery=battery, update=update)
+        return
+    
+    percent_name = f"solar_{int(solar_percent*100)}"
+    path = os.path.join(PathConfiguration.ESTIMATIONS_DIR_PATH, estimation_name, f"{percent_name}.csv")
+    
+    problem_type = f"bilevel{'_ppa' if ppa_price is not None else ''}{'_battery' if battery else ''}"
+    ppa_suffix = f"ppa_{ppa_price}" if ppa_price is not None else ""
+    
+    # Hierarchical solved and images directories
+    solved_dir = os.path.join(PathConfiguration.SOLVED_ESTIMATIONS_DIR_PATH, estimation_name, percent_name, problem_type, ppa_suffix)
+    solved_path = os.path.join(solved_dir, "results.csv")
+    info_path = os.path.join(solved_dir, "info.json")
+    
+    # Check if files already exist and update flag is False
+    if not update and _check_bilevel_files_exist(solved_path, info_path):
+        print(f"Skipping (already exists): solar={int(solar_percent*100)}% ppa={ppa_price} battery={battery}")
+        return
+    
+    p = StrategicOfferingProblem(path, ppa_price=ppa_price, battery=battery)
     p.solve()
 
-    problem_name = f"bilevel{'_' + 'ppa' if p.ppa else ''}{'_' + 'battery' if p.battery else ''}"
-
-    solved_dir = os.path.join(SOLVED_ESTIMATIONS_DIR_PATH, ESTIMATIONS_TO_SOLVE["name"])
     os.makedirs(solved_dir, exist_ok=True)
-    solved_path = os.path.join(solved_dir, f"{problem_name}.csv")
     p.save_dataframe(solved_path)
-
-    images_dir = os.path.join(IMAGES_DIR_PATH, ESTIMATIONS_TO_SOLVE["name"], problem_name)
-    os.makedirs(images_dir, exist_ok=True)
-    p.save_market_plots(output_dir=images_dir, show_dashed_lines=True)
-    p.save_monotone_price_curve(output_dir=images_dir)
+    
+    p.save_results_info(info_path)
 
 if __name__ == "__main__":
     main()

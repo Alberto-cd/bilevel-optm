@@ -5,7 +5,7 @@ import os
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-from .constants import ESTIMATIONS_TO_CREATE
+from .configuration import PathConfiguration, ExecutionConfiguration
 
 class DataProcessor():
     def __init__(self, json_path: str, csv_path: str, percent:float=0.2):
@@ -95,6 +95,7 @@ class DataProcessor():
         return combined_df[['is_generator', 'own', 'entity', 'years', 'hour', 'offer', 'limit']]
 
     def save_dataframe(self, path:str, decimals:None|int=None):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         df = self.dataframe.copy()
         if decimals is not None:
             df = df.round(decimals)
@@ -150,7 +151,10 @@ class ElectricityMarketCurvesDataframe():
         return df
 
 class ElectricityMarketSolvedDataframe(ElectricityMarketCurvesDataframe):
-    def __init__(self, base_df: ElectricityMarketCurvesDataframe, taken: dict = None, prices: dict = None, ppa_percentage: float = 0.0):
+    def __init__(self, base_df: ElectricityMarketCurvesDataframe = None, taken: dict = None, prices: dict = None, ppa_percentage: float = 0.0, path: str = None):
+        if path is not None:
+            self.df = pd.read_csv(path)
+            return
         # Copy base columns and add solved columns
         self.columns = base_df.columns + ["taken", "price"]
         # Copy base dataframe
@@ -187,7 +191,9 @@ class ElectricityMarketSolvedDataframe(ElectricityMarketCurvesDataframe):
             print("Unable to save market plots: Dataframe not set.")
             return
         
-        os.makedirs(output_dir, exist_ok=True)
+        # If an output directory is provided, create it. If `None` or empty, show plots instead of saving.
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
 
         hours = list(self.df["hour"].unique())[:limit] if limit is not None else list(self.df["hour"].unique())
         for hour in hours:
@@ -200,14 +206,18 @@ class ElectricityMarketSolvedDataframe(ElectricityMarketCurvesDataframe):
 
             # Create bid/offer curves data
             demands_info = [[row["limit"], row["offer"]] for _, row in demand_data.iterrows()]
-            own_gen_info = [[row["limit"], row["offer"]] for _, row in own_gen_data.iterrows() if row["limit"] > 0]
-            # own_gen_info = []
-            ext_gen_info = [[row["limit"], row["offer"]] for _, row in ext_gen_data.iterrows()]
 
             # Sort data for plotting
             demands_info.sort(key=lambda x: x[1], reverse=True)  # Sort by bid (descending)
-            generators_info = own_gen_info + ext_gen_info
-            generators_info.sort(key=lambda x: x[1])  # Sort by offer (ascending)
+
+            # Build generators list preserving ownership flag and sort by offer
+            generators_info = []
+            for _, row in own_gen_data.iterrows():
+                if row["limit"] > 0:
+                    generators_info.append({"limit": row["limit"], "offer": row["offer"], "is_own": True})
+            for _, row in ext_gen_data.iterrows():
+                generators_info.append({"limit": row["limit"], "offer": row["offer"], "is_own": False})
+            generators_info.sort(key=lambda x: x["offer"])  # Sort by offer (ascending)
 
             # Plot market curves
             plt.figure(figsize=(10, 6))
@@ -225,9 +235,10 @@ class ElectricityMarketSolvedDataframe(ElectricityMarketCurvesDataframe):
             # Plot supply curves
             x_supply = 0
             last_offer = None
-            for i, (limit, offer) in enumerate(generators_info):
-                # Use green for own generators, red for external
-                color = "green" if i < len(own_gen_info) else "red"
+            for info in generators_info:
+                limit = info["limit"]
+                offer = info["offer"]
+                color = "green" if info.get("is_own") else "red"
                 if last_offer is not None:
                     plt.plot([x_supply, x_supply], [last_offer, offer], color=color)
                 plt.plot([x_supply, x_supply + limit], [offer, offer], color=color, linewidth=2)
@@ -237,7 +248,7 @@ class ElectricityMarketSolvedDataframe(ElectricityMarketCurvesDataframe):
             # Add market clearing lines
             max_quantity = max(x_demand, x_supply) if max(x_demand, x_supply) > 0 else 100
             max_price = max((demands_info[0][1] if demands_info else 100),
-                           (generators_info[-1][1] if generators_info else 100)) * 1.1
+                           (generators_info[-1]["offer"] if generators_info else 100)) * 1.1
             
             market_price = df_hour["price"].iloc[0]
             supplied_demand = demand_data["taken"].sum()
@@ -250,7 +261,7 @@ class ElectricityMarketSolvedDataframe(ElectricityMarketCurvesDataframe):
 
             # Set plot limits and labels
             min_price = min((demands_info[-1][1] if demands_info else 0),
-                           (generators_info[0][1] if generators_info else 0),
+                           (generators_info[0]["offer"] if generators_info else 0),
                            0) * 1.1
             plt.xlim(0, max_quantity)
             plt.ylim(min_price, max_price)
@@ -260,9 +271,11 @@ class ElectricityMarketSolvedDataframe(ElectricityMarketCurvesDataframe):
 
             # Custom legend with correct colors and only present categories
             legend_elements = [Line2D([0], [0], color='blue', lw=2, label='Demand')]
-            if len(own_gen_info) > 0:
+            own_count = sum(1 for g in generators_info if g.get("is_own"))
+            ext_count = len(generators_info) - own_count
+            if own_count > 0:
                 legend_elements.append(Line2D([0], [0], color='green', lw=2, label='Own Generators'))
-            if len(ext_gen_info) > 0:
+            if ext_count > 0:
                 legend_elements.append(Line2D([0], [0], color='red', lw=2, label='External Generators'))
             if show_dashed_lines:
                 legend_elements.append(Line2D([0], [0], color='orange', lw=2, linestyle='--', label=f'Market Price: {market_price:.2f}'))
@@ -270,16 +283,24 @@ class ElectricityMarketSolvedDataframe(ElectricityMarketCurvesDataframe):
             plt.legend(handles=legend_elements)
             plt.grid(True, alpha=0.3)
 
-            # Save plot
-            plot_path = os.path.join(output_dir, f"market_hour_{hour}.png")
-            plt.savefig(plot_path, dpi=300, bbox_inches="tight")
-            plt.close()
+            if not output_dir:
+                plt.show()
+            else:
+                plot_path = os.path.join(output_dir, f"market_hour_{hour}.png")
+                plt.savefig(plot_path, dpi=300, bbox_inches="tight")
+                plt.close()
+            
+
     
     def save_monotone_price_curve(self, output_dir: str):
         if self.df is None:
             print("Unable to save monotone price curve: Dataframe not set.")
             return
-        os.makedirs(output_dir, exist_ok=True)
+        if not output_dir:
+            # If no output_dir provided, show the plot instead of saving
+            output_dir = None
+        else:
+            os.makedirs(output_dir, exist_ok=True)
         # Use only rows with valid market price and taken quantity
         df_valid = self.df[(self.df["price"] > 0) & (self.df["taken"] > 0)]
         # Group by hour, sum taken per hour, get market price per hour
@@ -295,14 +316,32 @@ class ElectricityMarketSolvedDataframe(ElectricityMarketCurvesDataframe):
         plt.ylabel("Market Price (€/MWh)")
         plt.title("Monotone Market Price Curve (Year)")
         plt.grid(True, alpha=0.3)
-        output_path = os.path.join(output_dir, "monotone_price_curve.png")
-        plt.savefig(output_path, dpi=300, bbox_inches="tight")
-        plt.close()
+        if output_dir is None:
+            plt.show()
+        else:
+            output_path = os.path.join(output_dir, "monotone_price_curve.png")
+            plt.savefig(output_path, dpi=300, bbox_inches="tight")
+            plt.close()
 
 
-def main():
-    DataProcessor(ESTIMATIONS_TO_CREATE["base_estimations"], ESTIMATIONS_TO_CREATE["profile"], ESTIMATIONS_TO_CREATE["percent"]).save_dataframe(ESTIMATIONS_TO_CREATE["final_path"])
-    ElectricityMarketCurvesDataframe(ESTIMATIONS_TO_CREATE["final_path"])
+def main(base_estimations: str, profile: str, estimation_name: str, update: bool = True):
+    for percent in ExecutionConfiguration.SOLAR_PERCENTS:
+        # Store in a directory named as the estimation names
+        percent_dir = os.path.join(PathConfiguration.ESTIMATIONS_DIR_PATH, estimation_name)
+        percent_name = f"solar_{int(percent*100)}"
+        final_path = os.path.join(percent_dir, f"{percent_name}.csv")
+        
+        # Check if files already exist and update flag is False
+        if not update and os.path.exists(final_path):
+            print(f"Skipping (already exists): {final_path}")
+            continue
+
+        base_est_path = os.path.join(PathConfiguration.BASE_ESTIMATIONS_DIR_PATH, base_estimations)
+        profile_path = os.path.join(PathConfiguration.PROFILES_DIR_PATH, profile)
+        
+        print(f"Generating data for solar percent: {percent*100}% -> {final_path}")
+        DataProcessor(base_est_path, profile_path, percent).save_dataframe(final_path)
+        ElectricityMarketCurvesDataframe(final_path)
 
 if __name__ == "__main__":
     main()
