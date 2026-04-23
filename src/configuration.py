@@ -1,12 +1,6 @@
 import os
 
 # Configuration for running the optimization solvers
-# 
-# The 'update' flag controls whether to recompute results:
-#   - update=True (default): Always recompute and overwrite results
-#   - update=False: Skip computation if results already exist (faster for re-runs)
-# 
-# Add "update": False to any solver's args to skip recomputation of existing results
 
 class PathConfiguration():
     DATA_DIR_PATH = "data"
@@ -26,14 +20,8 @@ PathConfiguration.create_directories()
 
 class ExecutionConfiguration():
     # Variables that you may edit
-    # BASE_ESTIMATIONS = "market_data.json"
-    # PROFILE = "esios_profiles_processed2023.csv"
-    # Use 0.0 for tests placed in a folder (e.g. estimations/test_2/solar_0.csv)
-    # SOLAR_PERCENTS = [0.0]
     PPA_PERCENTS = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
-    # PPA_PRICES = list(range(-30, 16))
 
-    # ESTIMATIONS_NAME = "test"
     SOLVERS = [
         {"module": "market.market", "args": {"estimation_name": "test", "solar_percent": 0.0, "ppa_percent": PPA_PERCENTS, "update": False}},
         {"module": "market.visualizer", "args":{"estimation_name": "test", "update": False}},
@@ -55,14 +43,3 @@ class ExecutionConfiguration():
     ]
     M_MARGIN_MULTIPLIER = 1.2
     SOLVER_TIMEOUT_SECONDS = 6000  # 100 minutes
-
-    # Automatic variables
-    # PARTICULAR_SOLVED_ESTIMATIONS_DIR_PATH = os.path.join(PathConfiguration.SOLVED_ESTIMATIONS_DIR_PATH, ESTIMATIONS_NAME)
-
-#     @classmethod
-#     def create_directories(cls):
-#         for attr in cls.__dict__:
-#             if attr.endswith("_DIR_PATH"):
-#                 os.makedirs(getattr(cls, attr), exist_ok=True)
-
-# ExecutionConfiguration.create_directories()
