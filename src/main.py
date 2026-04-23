@@ -1,7 +1,7 @@
 from .data import main as data_main
-from .market.market import main as market_solver_main
+from .market.solver import main as market_solver_main
 from .market.visualizer import main as market_visualizer_main
-from .bilevel.bilevel_kkt import main as bilevel_solver_main
+from .bilevel.solver import main as bilevel_solver_main
 from .bilevel.visualizer import main as bilevel_visualizer_main
 
 
@@ -25,13 +25,13 @@ def _execute_test_estimations():
     """Execute solvers for test estimation set."""
     _print_title("Test Estimations")
     
-    _print_subtitle("Executing: market.market (test)")
+    _print_subtitle("Executing: market.solver (test)")
     market_solver_main(estimation_name="test", solar_percent=0.0, ppa_percent=PPA_PERCENTS, update=False)
     
     _print_subtitle("Executing: market.visualizer (test)")
     market_visualizer_main(estimation_name="test", update=False)
     
-    _print_subtitle("Executing: bilevel.bilevel_kkt (test)")
+    _print_subtitle("Executing: bilevel.solver (test)")
     bilevel_solver_main(estimation_name="test", solar_percent=0.0, ppa_price=list(range(-30, 16)), update=False)
     
     _print_subtitle("Executing: bilevel.visualizer (test)")
@@ -42,13 +42,13 @@ def _execute_test_2_estimations():
     """Execute solvers for test_2 estimation set."""
     _print_title("Test 2 Estimations")
     
-    _print_subtitle("Executing: market.market (test_2)")
+    _print_subtitle("Executing: market.solver (test_2)")
     market_solver_main(estimation_name="test_2", solar_percent=0.0, ppa_percent=PPA_PERCENTS, update=False)
     
     _print_subtitle("Executing: market.visualizer (test_2)")
     market_visualizer_main(estimation_name="test_2", update=False)
     
-    _print_subtitle("Executing: bilevel.bilevel_kkt (test_2)")
+    _print_subtitle("Executing: bilevel.solver (test_2)")
     bilevel_solver_main(estimation_name="test_2", solar_percent=0.0, ppa_price=list(range(-15, 16)), update=False)
     
     _print_subtitle("Executing: bilevel.visualizer (test_2)")
@@ -68,7 +68,7 @@ def _execute_estimations_2030():
         update=False
     )
     
-    _print_subtitle("Executing: market.market (estimations_2030)")
+    _print_subtitle("Executing: market.solver (estimations_2030)")
     market_solver_main(
         estimation_name="estimations_2030",
         solar_percent=[0.0, 0.01, 0.05, 0.1, 0.2, 0.5, 1],
@@ -79,7 +79,7 @@ def _execute_estimations_2030():
     _print_subtitle("Executing: market.visualizer (estimations_2030)")
     market_visualizer_main(estimation_name="estimations_2030", update=False)
     
-    _print_subtitle("Executing: bilevel.bilevel_kkt (estimations_2030 - solar_percent=0.01)")
+    _print_subtitle("Executing: bilevel.solver (estimations_2030 - solar_percent=0.01)")
     bilevel_solver_main(
         estimation_name="estimations_2030",
         solar_percent=0.01,
@@ -87,7 +87,7 @@ def _execute_estimations_2030():
         update=False
     )
     
-    _print_subtitle("Executing: bilevel.bilevel_kkt (estimations_2030 - solar_percent=0.05)")
+    _print_subtitle("Executing: bilevel.solver (estimations_2030 - solar_percent=0.05)")
     bilevel_solver_main(
         estimation_name="estimations_2030",
         solar_percent=0.05,
@@ -95,7 +95,7 @@ def _execute_estimations_2030():
         update=False
     )
     
-    _print_subtitle("Executing: bilevel.bilevel_kkt (estimations_2030 - solar_percent=0.1)")
+    _print_subtitle("Executing: bilevel.solver (estimations_2030 - solar_percent=0.1)")
     bilevel_solver_main(
         estimation_name="estimations_2030",
         solar_percent=0.1,
@@ -103,7 +103,7 @@ def _execute_estimations_2030():
         update=False
     )
     
-    _print_subtitle("Executing: bilevel.bilevel_kkt (estimations_2030 - solar_percent=0.2)")
+    _print_subtitle("Executing: bilevel.solver (estimations_2030 - solar_percent=0.2)")
     bilevel_solver_main(
         estimation_name="estimations_2030",
         solar_percent=0.2,
