@@ -212,18 +212,14 @@ def main(estimation_name: str = None, update: bool = True):
     viz = MarketVisualizer(estimation_name=estimation_name, update=update)
     
     # Generate individual plots for all results
-    print("\n" + "="*50)
-    print(f"Generating individual market plots for: {estimation_name}")
-    print("="*50)
+    print(f"\nGenerating individual market plots for: {estimation_name}")
     viz.plot_individual_results()
     
     # Get unique solar percentages for comparison plots
     solar_percents = sorted(set(r["solar_percent"] for r in viz.results))
     
     # Create per-solar comparisons
-    print("\n" + "="*50)
-    print("Generating per-solar PPA comparison plots")
-    print("="*50)
+    print("\nGenerating per-solar PPA comparison plots")
     for solar_pct in solar_percents:
         images_dir = os.path.join(
             PathConfiguration.IMAGES_DIR_PATH,
@@ -235,9 +231,7 @@ def main(estimation_name: str = None, update: bool = True):
         viz_for_solar.plot_ppa_comparison_for_solar(solar_pct, output_dir=images_dir)
     
     # Create overall comparison across all solar percentages
-    print("\n" + "="*50)
-    print("Generating overall solar comparison plot")
-    print("="*50)
+    print("\nGenerating overall solar comparison plot")
     overall_images_dir = os.path.join(
         PathConfiguration.IMAGES_DIR_PATH,
         estimation_name,

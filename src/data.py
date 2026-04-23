@@ -5,7 +5,7 @@ import os
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-from .configuration import PathConfiguration, ExecutionConfiguration
+from .configuration import PathConfiguration
 
 class DataProcessor():
     def __init__(self, json_path: str, csv_path: str, percent:float=0.2):

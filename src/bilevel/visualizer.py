@@ -204,18 +204,14 @@ def main(estimation_name: str = None, update: bool = True):
     viz = PPAVisualizer(estimation_name=estimation_name, update=update)
     
     # Generate individual plots for all results
-    print("\n" + "="*50)
-    print(f"Generating individual bilevel PPA plots for: {estimation_name}")
-    print("="*50)
+    print(f"\nGenerating individual bilevel PPA plots for: {estimation_name}")
     viz.plot_individual_results()
     
     # Get unique solar percentages for comparison plots
     solar_percents = sorted(set(r["solar_percent"] for r in viz.results))
     
     # Create per-solar comparisons
-    print("\n" + "="*50)
-    print("Generating per-solar PPA price vs percentage plots")
-    print("="*50)
+    print("\nGenerating per-solar PPA price vs percentage plots")
     for solar_pct in solar_percents:
         images_dir = os.path.join(
             PathConfiguration.IMAGES_DIR_PATH,
@@ -226,9 +222,7 @@ def main(estimation_name: str = None, update: bool = True):
         viz.plot_price_vs_percentage_for(solar_pct, output_dir=images_dir)
     
     # Create overall comparison across all solar percentages
-    print("\n" + "="*50)
-    print("Generating overall comparison plot")
-    print("="*50)
+    print("\nGenerating overall comparison plot")
     images_dir = os.path.join(
         PathConfiguration.IMAGES_DIR_PATH,
         estimation_name,
