@@ -324,24 +324,34 @@ class ElectricityMarketSolvedDataframe(ElectricityMarketCurvesDataframe):
             plt.close()
 
 
-def main(base_estimations: str, profile: str, estimation_name: str, update: bool = True):
-    for percent in ExecutionConfiguration.SOLAR_PERCENTS:
-        # Store in a directory named as the estimation names
-        percent_dir = os.path.join(PathConfiguration.ESTIMATIONS_DIR_PATH, estimation_name)
-        percent_name = f"solar_{int(percent*100)}"
-        final_path = os.path.join(percent_dir, f"{percent_name}.csv")
-        
-        # Check if files already exist and update flag is False
-        if not update and os.path.exists(final_path):
-            print(f"Skipping (already exists): {final_path}")
-            continue
+def main(base_estimations: str, profile: str, estimation_name: str, solar_percent=None, update: bool = True):
+    # Handle list-type solar_percent parameter (iterate over percentages)
+    if isinstance(solar_percent, (list, tuple)):
+        for solar in solar_percent:
+            main(base_estimations=base_estimations, profile=profile, estimation_name=estimation_name, 
+                 solar_percent=solar, update=update)
+        return
+    
+    # If no solar_percent provided, use default value
+    if solar_percent is None:
+        solar_percent = 0.2
+    
+    # Store in a directory named as the estimation names
+    percent_dir = os.path.join(PathConfiguration.ESTIMATIONS_DIR_PATH, estimation_name)
+    percent_name = f"solar_{int(solar_percent*100)}"
+    final_path = os.path.join(percent_dir, f"{percent_name}.csv")
+    
+    # Check if files already exist and update flag is False
+    if not update and os.path.exists(final_path):
+        print(f"Skipping (already exists): {final_path}")
+        return
 
-        base_est_path = os.path.join(PathConfiguration.BASE_ESTIMATIONS_DIR_PATH, base_estimations)
-        profile_path = os.path.join(PathConfiguration.PROFILES_DIR_PATH, profile)
-        
-        print(f"Generating data for solar percent: {percent*100}% -> {final_path}")
-        DataProcessor(base_est_path, profile_path, percent).save_dataframe(final_path)
-        ElectricityMarketCurvesDataframe(final_path)
+    base_est_path = os.path.join(PathConfiguration.BASE_ESTIMATIONS_DIR_PATH, base_estimations)
+    profile_path = os.path.join(PathConfiguration.PROFILES_DIR_PATH, profile)
+    
+    print(f"Generating data for solar percent: {solar_percent*100}% -> {final_path}")
+    DataProcessor(base_est_path, profile_path, solar_percent).save_dataframe(final_path)
+    ElectricityMarketCurvesDataframe(final_path)
 
 if __name__ == "__main__":
     main()
