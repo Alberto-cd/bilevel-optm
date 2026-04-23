@@ -97,36 +97,16 @@ class MarketVisualizer():
         # Sort by solar_percent then by ppa_percent
         return sorted(results, key=lambda x: (x["solar_percent"], x["ppa_percent"]))
 
-    def _check_individual_plots_exist(self, images_dir: str) -> bool:
-        """Check if individual plots already exist in the images directory.
-        Checks for both the monotone price curve and at least one market hour plot."""
-        monotone_exists = os.path.exists(os.path.join(images_dir, "monotone_price_curve.png"))
-        # Check if at least one market_hour plot exists
-        market_plots_exist = False
-        if os.path.exists(images_dir):
-            market_plots_exist = any(f.startswith("market_hour_") and f.endswith(".png") 
-                                     for f in os.listdir(images_dir))
-        return monotone_exists and market_plots_exist
-
     def plot_individual_results(self):
-        """Generate and save individual plots (market_plots and monotone curve) for each result."""
+        """Generate and save individual plots (market_plots, monotone curve, and price history) for each result."""
         for result in self.results:
             images_dir = result["images_dir"]
             solved_df = result["solved_df"]
             ppa_name = result["ppa_name"]
             solar_name = result["solar_name"]
             
-            # Check if plots already exist and update flag is False
-            if not self.update and self._check_individual_plots_exist(images_dir):
-                print(f"Skipping (already exists): {solar_name}/{ppa_name}")
-                continue
-            
             print(f"Saving plots for {solar_name}/{ppa_name}")
-            os.makedirs(images_dir, exist_ok=True)
-            
-            # Save market plots and monotone curve
-            solved_df.save_market_plots(images_dir, show_dashed_lines=True)
-            solved_df.save_monotone_price_curve(output_dir=images_dir)
+            solved_df.save_all_plots(images_dir, update=self.update, show_dashed_lines=True)
 
     def plot_ppa_comparison_for_solar(self, solar_percent: float, output_dir: str = None):
         """Plot monotone price curves comparing different PPA percentages for a single solar percent."""

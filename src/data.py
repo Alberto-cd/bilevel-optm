@@ -322,6 +322,70 @@ class ElectricityMarketSolvedDataframe(ElectricityMarketCurvesDataframe):
             output_path = os.path.join(output_dir, "monotone_price_curve.png")
             plt.savefig(output_path, dpi=300, bbox_inches="tight")
             plt.close()
+    
+    def save_price_history(self, output_dir: str):
+        """Plot the market price history across all hours of the year."""
+        if self.df is None:
+            print("Unable to save price history: Dataframe not set.")
+            return
+        if not output_dir:
+            # If no output_dir provided, show the plot instead of saving
+            output_dir = None
+        else:
+            os.makedirs(output_dir, exist_ok=True)
+        
+        # Get unique prices per hour (take first price for each hour)
+        hourly_prices = self.df[self.df["price"] > 0].groupby("hour").agg({"price": "first"}).reset_index()
+        hourly_prices = hourly_prices.sort_values(by="hour")
+        
+        # Plot price over time
+        plt.figure(figsize=(12, 6))
+        plt.plot(hourly_prices["hour"], hourly_prices["price"], color="steelblue", linewidth=1.5, marker='o', markersize=3)
+        plt.xlabel("Hour of Year")
+        plt.ylabel("Market Price (€/MWh)")
+        plt.title("Market Price History (Year)")
+        plt.grid(True, alpha=0.3)
+        
+        if output_dir is None:
+            plt.show()
+        else:
+            output_path = os.path.join(output_dir, "price_history.png")
+            plt.savefig(output_path, dpi=300, bbox_inches="tight")
+            plt.close()
+    
+    def save_all_plots(self, output_dir: str, update: bool = True, show_dashed_lines: bool = True):
+        """Save all individual plots (market plots, monotone curve, and price history).
+        
+        Args:
+            output_dir: Directory to save plots
+            update: If True, regenerate all plots. If False, only create missing plots.
+            show_dashed_lines: Whether to show dashed lines in market plots
+        """
+        if self.df is None:
+            print("Unable to save plots: Dataframe not set.")
+            return
+        
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Check which plots exist (only matters if update=False)
+        market_plots_exist = False
+        monotone_exists = os.path.exists(os.path.join(output_dir, "monotone_price_curve.png"))
+        price_history_exists = os.path.exists(os.path.join(output_dir, "price_history.png"))
+        
+        if not update:
+            # Check if at least one market_hour plot exists
+            market_plots_exist = any(f.startswith("market_hour_") and f.endswith(".png") 
+                                     for f in os.listdir(output_dir) if os.path.isfile(os.path.join(output_dir, f)))
+        
+        # Save plots if needed
+        if update or not market_plots_exist:
+            self.save_market_plots(output_dir, show_dashed_lines=show_dashed_lines)
+        
+        if update or not monotone_exists:
+            self.save_monotone_price_curve(output_dir=output_dir)
+        
+        if update or not price_history_exists:
+            self.save_price_history(output_dir=output_dir)
 
 
 def main(base_estimations: str, profile: str, estimation_name: str, solar_percent=None, update: bool = True):

@@ -23,6 +23,9 @@ class ExecutionConfiguration():
     PPA_PERCENTS = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 
     SOLVERS = [
+        # {"module": "market.visualizer", "args":{"update": False}},
+        # {"module": "bilevel.visualizer", "args":{"update": False}},
+
         {"module": "market.market", "args": {"estimation_name": "test", "solar_percent": 0.0, "ppa_percent": PPA_PERCENTS, "update": False}},
         {"module": "market.visualizer", "args":{"estimation_name": "test", "update": False}},
         {"module": "bilevel.bilevel_kkt", "args": {"estimation_name": "test", "solar_percent": 0.0, "ppa_price": list(range(-30, 16)), "update": False}},
