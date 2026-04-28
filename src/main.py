@@ -115,6 +115,17 @@ def _execute_estimations_2030():
     bilevel_visualizer_main(estimation_name="estimations_2030", update=False)
 
 
+def _visualize_everything():
+    """Execute visualizers for every dataset."""
+    _print_title("Visualization")
+    
+    _print_subtitle("Executing: market.visualizer")
+    market_visualizer_main(update=False)
+    
+    _print_subtitle("Executing: bilevel.visualizer")
+    bilevel_visualizer_main(update=False)
+
+
 def main():
     """Execute all solvers with explicit function calls."""
     
@@ -122,6 +133,7 @@ def main():
         _execute_test_estimations()
         _execute_test_2_estimations()
         _execute_estimations_2030()
+        # _visualize_everything()
         
         print("\n" + "="*50)
         print("EXECUTION COMPLETED SUCCESSFULLY")

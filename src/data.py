@@ -353,6 +353,67 @@ class ElectricityMarketSolvedDataframe(ElectricityMarketCurvesDataframe):
             plt.savefig(output_path, dpi=300, bbox_inches="tight")
             plt.close()
     
+    def calculate_profit(self, ppa_percentage: float = 0.0, ppa_price: float = 0.0, original_df: 'pd.DataFrame' = None):
+        """Calculate the profit of the own generator in the market and PPA.
+        
+        Args:
+            ppa_percentage: The percentage of capacity sold via PPA (0.0 to 1.0)
+            ppa_price: The price per MWh for the PPA (€/MWh)
+        
+        Returns:
+            float: Total profit = market_profit + ppa_profit
+                   market_profit = sum((market_price - offer_cost) * market_quantity)
+                   ppa_profit = sum((ppa_price - offer_cost) * ppa_quantity)
+        """
+        if self.df is None:
+            print("Unable to calculate profit: Dataframe not set.")
+            return 0.0
+        
+        # Filter for own generator only
+        own_gen_data = self.df[(self.df["is_generator"]) & (self.df["own"])].copy()
+        
+        if own_gen_data.empty:
+            return 0.0
+        
+        # Calculate market portion profit: (price - offer) * taken
+        own_gen_data["market_profit"] = (own_gen_data["price"] - own_gen_data["offer"]) * own_gen_data["taken"]
+        
+        # Calculate PPA portion profit if PPA percentage > 0
+        ppa_profit = 0.0
+        if ppa_percentage > 0.0 and ppa_price > 0.0:
+            # Prefer to use original limits if provided (estimation CSV before PPA reduction)
+            if original_df is not None:
+                try:
+                    orig_limits = original_df[["entity", "hour", "limit"]].rename(columns={"limit": "limit_original"})
+                    own_gen_data = own_gen_data.merge(orig_limits, on=["entity", "hour"], how="left")
+                    # If any original limits missing, fall back to current limit / (1 - ppa_percentage) when safe
+                    missing_mask = own_gen_data["limit_original"].isna()
+                    if missing_mask.any():
+                        if (1 - ppa_percentage) != 0:
+                            own_gen_data.loc[missing_mask, "limit_original"] = own_gen_data.loc[missing_mask, "limit"] / (1 - ppa_percentage)
+                        else:
+                            own_gen_data.loc[missing_mask, "limit_original"] = 0.0
+                    own_gen_data["ppa_quantity"] = own_gen_data["limit_original"] * ppa_percentage
+                    own_gen_data["ppa_profit_contribution"] = (ppa_price - own_gen_data["offer"]) * own_gen_data["ppa_quantity"]
+                    ppa_profit = own_gen_data["ppa_profit_contribution"].sum()
+                except Exception:
+                    ppa_profit = 0.0
+            else:
+                # Fallback: try to reconstruct original limits from reduced limits.
+                if (1 - ppa_percentage) == 0:
+                    print("Warning: cannot reconstruct original limits for ppa_percentage=1.0 without original data. PPA profit set to 0.")
+                    ppa_profit = 0.0
+                else:
+                    own_gen_data["limit_original"] = own_gen_data["limit"] / (1 - ppa_percentage)
+                    own_gen_data["ppa_quantity"] = own_gen_data["limit_original"] * ppa_percentage
+                    own_gen_data["ppa_profit_contribution"] = (ppa_price - own_gen_data["offer"]) * own_gen_data["ppa_quantity"]
+                    ppa_profit = own_gen_data["ppa_profit_contribution"].sum()
+        
+        # Sum market profits
+        market_profit = own_gen_data["market_profit"].sum()
+        
+        return float(market_profit + ppa_profit)
+    
     def save_all_plots(self, output_dir: str, update: bool = True, show_dashed_lines: bool = True):
         """Save all individual plots (market plots, monotone curve, and price history).
         

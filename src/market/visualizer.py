@@ -2,7 +2,7 @@ import os
 import matplotlib.pyplot as plt
 from matplotlib import colors
 
-from ..data import ElectricityMarketSolvedDataframe
+from ..data import ElectricityMarketSolvedDataframe, ElectricityMarketCurvesDataframe
 from ..configuration import PathConfiguration
 
 
@@ -73,6 +73,19 @@ class MarketVisualizer():
                     sorted_grouped = grouped.sort_values(by="price", ascending=False)
                     sorted_grouped["cum_quantity"] = sorted_grouped["taken"].cumsum()
                     
+                    # Try to load the original estimation CSV (before PPA reduction)
+                    base_csv_path = os.path.join(
+                        PathConfiguration.ESTIMATIONS_DIR_PATH,
+                        self.estimation_name,
+                        f"{solar_folder}.csv"
+                    )
+                    base_df = None
+                    try:
+                        if os.path.exists(base_csv_path):
+                            base_df = ElectricityMarketCurvesDataframe(base_csv_path)
+                    except Exception:
+                        base_df = None
+
                     results.append({
                         "solar_percent": solar_percent_val,
                         "solar_name": solar_folder,
@@ -87,6 +100,7 @@ class MarketVisualizer():
                             ppa_folder
                         ),
                         "solved_df": solved_df,
+                        "base_df": base_df,
                         "cum_quantity": sorted_grouped["cum_quantity"].values,
                         "prices": sorted_grouped["price"].values
                     })
@@ -187,13 +201,121 @@ class MarketVisualizer():
         else:
             plt.show()
 
+    def plot_profit_comparison_for_solar(self, solar_percent: float, ppa_prices: list = None, output_dir: str = None):
+        """Plot profit vs PPA percentage for a single solar percent across different PPA price scenarios.
+        
+        Args:
+            solar_percent: The solar percentage to filter by
+            ppa_prices: List of PPA prices (€/MWh) to plot (e.g., [5, 10, 15, 20, 25])
+            output_dir: Directory to save the plot
+        """
+        if ppa_prices is None:
+            ppa_prices = [5, 10, 15, 20, 25]
+        
+        entries = [r for r in self.results if r["solar_percent"] == solar_percent]
+        if not entries:
+            print(f"No results for solar_percent={solar_percent}")
+            return
 
-def main(estimation_name: str = None, update: bool = True):
+        # Sort by PPA percent
+        entries = sorted(entries, key=lambda x: x["ppa_percent"])
+        ppa_percents = [e["ppa_percent"] * 100 for e in entries]
+
+        plt.figure(figsize=(11, 7))
+        cmap = plt.cm.viridis
+        n = len(ppa_prices)
+        
+        for i, ppa_price in enumerate(ppa_prices):
+            profits = [e["solved_df"].calculate_profit(ppa_percentage=e["ppa_percent"], ppa_price=ppa_price, original_df=(e.get("base_df").df if e.get("base_df") is not None else None)) 
+                      for e in entries]
+            
+            color = cmap(i / (n - 1)) if n > 1 else cmap(0.5)
+            label = f"PPA Price: {ppa_price} €/MWh"
+            plt.plot(ppa_percents, profits, marker='o', linewidth=2, markersize=6, 
+                    label=label, color=color)
+        
+        plt.xlabel("Market PPA Percentage (%)")
+        plt.ylabel("Generator Profit (€)")
+        plt.title(f"Generator Profit vs Market PPA Percentage - {entries[0]['solar_name']}")
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+            fname = os.path.join(output_dir, "profit_vs_ppa.png")
+            plt.savefig(fname, dpi=300, bbox_inches="tight")
+            print(f"Plot saved to {fname}")
+            plt.close()
+        else:
+            plt.show()
+
+    def plot_profit_comparison_all_solar(self, ppa_prices: list = None, output_dir: str = None):
+        """Plot profit vs PPA percentage for all solar percentages with different PPA price scenarios.
+        
+        Args:
+            ppa_prices: List of PPA prices (€/MWh) to plot. Only the first one is shown here (use solar-specific for all)
+            output_dir: Directory to save the plot
+        """
+        if ppa_prices is None:
+            ppa_prices = [15]  # Default to middle PPA price for overall comparison
+        
+        if not self.results:
+            print("No results to plot.")
+            return
+
+        # Use only the middle PPA price for overall comparison
+        ppa_price_to_use = ppa_prices[len(ppa_prices) // 2] if ppa_prices else 15
+
+        # Group by solar_percent
+        groups = {}
+        for r in self.results:
+            sp = r["solar_percent"]
+            groups.setdefault(sp, []).append(r)
+
+        sorted_sps = sorted(groups.keys())
+        n = len(sorted_sps)
+        cmap = plt.cm.viridis
+
+        plt.figure(figsize=(11, 7))
+        for i, sp in enumerate(sorted_sps):
+            entries = sorted(groups[sp], key=lambda x: x["ppa_percent"])
+            ppa_percents = [e["ppa_percent"] * 100 for e in entries]
+            profits = [e["solved_df"].calculate_profit(ppa_percentage=e["ppa_percent"], ppa_price=ppa_price_to_use, original_df=(e.get("base_df").df if e.get("base_df") is not None else None)) 
+                      for e in entries]
+            
+            frac = i / (n - 1) if n > 1 else 0
+            color = cmap(frac)
+            solar_label = f"Solar {int(sp*100)}%"
+            plt.plot(ppa_percents, profits, marker='o', linewidth=2, markersize=6, 
+                    label=solar_label, color=color)
+
+        plt.xlabel("Market PPA Percentage (%)")
+        plt.ylabel("Generator Profit (€)")
+        plt.title(f"Generator Profit vs Market PPA Percentage - All Solar (PPA Price: {ppa_price_to_use} €/MWh)")
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+            fname = os.path.join(output_dir, "profit_vs_ppa_all_solar.png")
+            plt.savefig(fname, dpi=300, bbox_inches="tight")
+            print(f"Plot saved to {fname}")
+            plt.close()
+        else:
+            plt.show()
+
+
+def main(estimation_name: str = None, update: bool = True, ppa_prices: list = None):
     """Auto-discover and generate all plots: individual results and comparisons.
     
-    If estimation_name is None, discovers all available estimations.
-    If estimation_name is provided, processes only that estimation.
+    Args:
+        estimation_name: Name of the estimation to process (None to process all)
+        update: Whether to regenerate existing plots
+        ppa_prices: List of PPA prices (€/MWh) to use for profit plots
     """
+    if ppa_prices is None:
+        ppa_prices = [5, 10, 15, 20, 25]
+    
     # If estimation_name is not provided, discover all estimations
     if estimation_name is None:
         solved_estimations_dir = PathConfiguration.SOLVED_ESTIMATIONS_DIR_PATH
@@ -205,7 +327,7 @@ def main(estimation_name: str = None, update: bool = True):
                           if os.path.isdir(os.path.join(solved_estimations_dir, d))]
         
         for est_name in estimation_names:
-            main(estimation_name=est_name, update=update)
+            main(estimation_name=est_name, update=update, ppa_prices=ppa_prices)
         return
     
     # Process single estimation
@@ -238,6 +360,22 @@ def main(estimation_name: str = None, update: bool = True):
         "comparisons"
     )
     viz.plot_ppa_comparison_all_solar(output_dir=overall_images_dir)
+    
+    # Generate profit comparison plots with multiple PPA prices
+    print(f"\nGenerating per-solar profit vs PPA comparison plots (PPA prices: {ppa_prices})")
+    for solar_pct in solar_percents:
+        images_dir = os.path.join(
+            PathConfiguration.IMAGES_DIR_PATH,
+            estimation_name,
+            f"solar_{int(solar_pct*100)}",
+            "market"
+        )
+        viz_for_solar = MarketVisualizer(estimation_name=estimation_name, solar_percent=solar_pct, update=update)
+        viz_for_solar.plot_profit_comparison_for_solar(solar_pct, ppa_prices=ppa_prices, output_dir=images_dir)
+    
+    # Create overall profit comparison across all solar percentages
+    print(f"\nGenerating overall profit vs PPA comparison plot (PPA price: {ppa_prices[0]} €/MWh)")
+    viz.plot_profit_comparison_all_solar(ppa_prices=ppa_prices, output_dir=overall_images_dir)
 
 
 if __name__ == "__main__":
