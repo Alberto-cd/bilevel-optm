@@ -292,7 +292,11 @@ class MarketVisualizer():
             sp = r["solar_percent"]
             groups.setdefault(sp, []).append(r)
 
-        sorted_sps = sorted(groups.keys())
+        # Exclude solar 0% as it provides no solar generation and skews comparisons
+        sorted_sps = sorted(sp for sp in groups.keys() if sp > 0)
+        if not sorted_sps:
+            print("No non-zero solar results to plot.")
+            return
         n = len(sorted_sps)
         cmap = plt.cm.viridis
 
