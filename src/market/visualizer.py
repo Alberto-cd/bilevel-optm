@@ -1,6 +1,7 @@
 import os
 import matplotlib.pyplot as plt
 from matplotlib import colors
+import numpy as np
 
 from ..data import ElectricityMarketSolvedDataframe, ElectricityMarketCurvesDataframe
 from ..configuration import PathConfiguration
@@ -225,6 +226,9 @@ class MarketVisualizer():
         plt.figure(figsize=(11, 7))
         cmap = plt.cm.viridis
         n = len(ppa_prices)
+        # track maxima (ppa_percent at which profit is max) for each ppa_price
+        best_ppa_percents = []
+        best_profits = []
         
         for i, ppa_price in enumerate(ppa_prices):
             profits = [e["solved_df"].calculate_profit(ppa_percentage=e["ppa_percent"], ppa_price=ppa_price, original_df=(e.get("base_df").df if e.get("base_df") is not None else None)) 
@@ -234,11 +238,23 @@ class MarketVisualizer():
             label = f"PPA Price: {ppa_price} €/MWh"
             plt.plot(ppa_percents, profits, marker='o', linewidth=2, markersize=6, 
                     label=label, color=color)
+            # compute and store the maximum point for this PPA price
+            try:
+                idx_max = int(np.argmax(profits)) if profits else None
+            except Exception:
+                idx_max = None
+            if idx_max is not None and profits:
+                best_ppa_percents.append(ppa_percents[idx_max])
+                best_profits.append(profits[idx_max])
         
         plt.xlabel("Market PPA Percentage (%)")
         plt.ylabel("Generator Profit (€)")
         plt.title(f"Generator Profit vs Market PPA Percentage - {entries[0]['solar_name']}")
         plt.grid(True, alpha=0.3)
+        # plot connecting red dashed line for maxima across PPA prices
+        if best_ppa_percents:
+            # ensure the connecting line follows the order of ppa_prices
+            plt.plot(best_ppa_percents, best_profits, color='red', linestyle='--', marker='o', linewidth=2, markersize=7, label='Max profit per PPA price')
         plt.legend()
         
         if output_dir:
