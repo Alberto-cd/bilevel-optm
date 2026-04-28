@@ -190,7 +190,8 @@ class MarketVisualizer():
         plt.ylabel("Market Price (€/MWh)")
         plt.title(f"Monotone Market Price Curves Across Solar Percentages ({self.estimation_name})")
         plt.grid(True, alpha=0.3)
-        plt.legend()
+        plt.subplots_adjust(right=0.75)
+        plt.legend(loc='center left', bbox_to_anchor=(1.0, 0.5))
         
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
@@ -249,12 +250,15 @@ class MarketVisualizer():
         else:
             plt.show()
 
-    def plot_profit_comparison_all_solar(self, ppa_prices: list = None, output_dir: str = None):
+    def plot_profit_comparison_all_solar(self, ppa_prices: list = None, output_dir: str = None, normalize: bool = True):
         """Plot profit vs PPA percentage for all solar percentages with different PPA price scenarios.
-        
+        Optionally normalizes each solar-percent curve by its maximum profit so curves are
+        comparable across different solar capacities.
+
         Args:
             ppa_prices: List of PPA prices (€/MWh) to plot. Only the first one is shown here (use solar-specific for all)
             output_dir: Directory to save the plot
+            normalize: If True, normalize each solar-percent profit curve by its max profit
         """
         if ppa_prices is None:
             ppa_prices = [15]  # Default to middle PPA price for overall comparison
@@ -277,23 +281,39 @@ class MarketVisualizer():
         cmap = plt.cm.viridis
 
         plt.figure(figsize=(11, 7))
+
+        if normalize:
+            ylabel = "Normalized Generator Profit (fraction of max)"
+            title = f"Generator Profit vs Market PPA Percentage - All Solar (Normalized, PPA Price: {ppa_price_to_use} €/MWh)"
+        else:
+            ylabel = "Generator Profit (€)"
+            title = f"Generator Profit vs Market PPA Percentage - All Solar (PPA Price: {ppa_price_to_use} €/MWh)"
+
         for i, sp in enumerate(sorted_sps):
             entries = sorted(groups[sp], key=lambda x: x["ppa_percent"])
             ppa_percents = [e["ppa_percent"] * 100 for e in entries]
-            profits = [e["solved_df"].calculate_profit(ppa_percentage=e["ppa_percent"], ppa_price=ppa_price_to_use, original_df=(e.get("base_df").df if e.get("base_df") is not None else None)) 
+            profits = [e["solved_df"].calculate_profit(ppa_percentage=e["ppa_percent"], ppa_price=ppa_price_to_use, original_df=(e.get("base_df").df if e.get("base_df") is not None else None))
                       for e in entries]
-            
+
+            # Normalize per-solar-percent curve if requested
+            plot_profits = profits
+            if normalize:
+                max_profit = max(profits) if profits else 0
+                if max_profit and max_profit != 0:
+                    plot_profits = [p / max_profit for p in profits]
+
             frac = i / (n - 1) if n > 1 else 0
             color = cmap(frac)
             solar_label = f"Solar {int(sp*100)}%"
-            plt.plot(ppa_percents, profits, marker='o', linewidth=2, markersize=6, 
+            plt.plot(ppa_percents, plot_profits, marker='o', linewidth=2, markersize=6,
                     label=solar_label, color=color)
 
         plt.xlabel("Market PPA Percentage (%)")
-        plt.ylabel("Generator Profit (€)")
-        plt.title(f"Generator Profit vs Market PPA Percentage - All Solar (PPA Price: {ppa_price_to_use} €/MWh)")
+        plt.ylabel(ylabel)
+        plt.title(title)
         plt.grid(True, alpha=0.3)
-        plt.legend()
+        plt.subplots_adjust(right=0.75)
+        plt.legend(loc='center left', bbox_to_anchor=(1.0, 0.5))
         
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
