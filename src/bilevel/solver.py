@@ -3,6 +3,7 @@ import pyomo.opt as po
 import os
 import json
 import time
+import numpy as np
 
 from ..data import ElectricityMarketCurvesDataframe, ElectricityMarketSolvedDataframe
 from ..configuration import PathConfiguration, ExecutionConfiguration
@@ -199,6 +200,261 @@ class StrategicOfferingProblem():
 
         return model
     
+    def _verify_solution(self, res):
+        """
+        Perform comprehensive numerical validation and verification of the solution.
+        Returns a dictionary with verification results.
+        """
+        tolerance = 1e-6
+        verification = {
+            "complementarity_check": {},
+            "kkt_conditions_check": {},
+            "economic_reasonableness_check": {},
+            "solver_optimality_check": {},
+            "overall_valid": True
+        }
+        
+        # ============ 1. COMPLEMENTARITY SATISFACTION CHECK ============
+        z_q_min_violations = 0
+        z_q_max_violations = 0
+        z_d_min_violations = 0
+        z_d_max_violations = 0
+        
+        for j in self.model.generators:
+            for t in self.model.hours:
+                # q_min complementarity: omega_q_min * production = 0
+                omega_q_min_val = pe.value(self.model.omega_q_min[j, t])
+                q_val = pe.value(self.model.production[j, t])
+                # For lower bound: if production > 0, omega should be 0; if omega > 0, production should be 0
+                if q_val > tolerance and omega_q_min_val > tolerance:
+                    z_q_min_violations += 1
+                
+                # q_max complementarity: omega_q_max * (capacity - production) = 0
+                omega_q_max_val = pe.value(self.model.omega_q_max[j, t])
+                q_limit = pe.value(self.model.generator_maximum_capacity[j, t])
+                # Apply PPA percentage adjustment for own generators if PPA is enabled
+                if self.ppa and j in self.model.own_generators:
+                    ppa_pct = pe.value(self.model.ppa_percentage)
+                    q_limit = q_limit * (1 - ppa_pct)
+                slack_val = q_limit - q_val  # slack = limit - production (without abs)
+                # For upper bound: if slack > 0 (not at limit), omega should be 0; if omega > 0, slack should be 0
+                if slack_val > tolerance and omega_q_max_val > tolerance:
+                    z_q_max_violations += 1
+        
+        for l in self.model.consumers:
+            for t in self.model.hours:
+                # d_min complementarity: omega_d_min * consumption = 0
+                omega_d_min_val = pe.value(self.model.omega_d_min[l, t])
+                d_val = pe.value(self.model.consumption[l, t])
+                # For lower bound: if consumption > 0, omega should be 0; if omega > 0, consumption should be 0
+                if d_val > tolerance and omega_d_min_val > tolerance:
+                    z_d_min_violations += 1
+                
+                # d_max complementarity: omega_d_max * (demand_max - consumption) = 0
+                omega_d_max_val = pe.value(self.model.omega_d_max[l, t])
+                d_limit = pe.value(self.model.demand_maximum[l, t])
+                slack_val = d_limit - d_val  # slack = limit - consumption (without abs)
+                # For upper bound: if slack > 0 (not at limit), omega should be 0; if omega > 0, slack should be 0
+                if slack_val > tolerance and omega_d_max_val > tolerance:
+                    z_d_max_violations += 1
+        
+        total_binary_vars = (len(self.model.generators) * len(self.model.hours) * 2 +
+                            len(self.model.consumers) * len(self.model.hours) * 2)
+        total_violations = z_q_min_violations + z_q_max_violations + z_d_min_violations + z_d_max_violations
+        
+        verification["complementarity_check"] = {
+            "z_q_min_violations": int(z_q_min_violations),
+            "z_q_max_violations": int(z_q_max_violations),
+            "z_d_min_violations": int(z_d_min_violations),
+            "z_d_max_violations": int(z_d_max_violations),
+            "total_violations": int(total_violations),
+            "total_binary_variables": int(total_binary_vars),
+            "violation_percentage": float(100 * total_violations / total_binary_vars if total_binary_vars > 0 else 0),
+            "passed": total_violations == 0
+        }
+        
+        # ============ 2. KKT CONDITIONS CHECK ============
+        # 2a. Primal Feasibility: Power Balance
+        power_balance_violations = 0
+        for t in self.model.hours:
+            production_sum = sum(pe.value(self.model.production[j, t]) for j in self.model.generators)
+            consumption_sum = sum(pe.value(self.model.consumption[l, t]) for l in self.model.consumers)
+            if abs(production_sum - consumption_sum) > tolerance:
+                power_balance_violations += 1
+        
+        # 2b. Dual Feasibility: All omega variables should be >= 0 (already enforced by constraints)
+        dual_feasibility_passed = True
+        for j in self.model.generators:
+            for t in self.model.hours:
+                if pe.value(self.model.omega_q_min[j, t]) < -tolerance or pe.value(self.model.omega_q_max[j, t]) < -tolerance:
+                    dual_feasibility_passed = False
+        
+        for l in self.model.consumers:
+            for t in self.model.hours:
+                if pe.value(self.model.omega_d_min[l, t]) < -tolerance or pe.value(self.model.omega_d_max[l, t]) < -tolerance:
+                    dual_feasibility_passed = False
+        
+        # 2c. Stationarity: Check stationarity constraints satisfaction
+        stationarity_violations = 0
+        for j in self.model.generators:
+            for t in self.model.hours:
+                stationary_val = (pe.value(self.model.generator_marginal_cost[j, t])
+                                - pe.value(self.model.lambda_power_balance[t])
+                                - pe.value(self.model.omega_q_min[j, t])
+                                + pe.value(self.model.omega_q_max[j, t]))
+                if abs(stationary_val) > tolerance:
+                    stationarity_violations += 1
+        
+        for l in self.model.consumers:
+            for t in self.model.hours:
+                stationary_val = (-pe.value(self.model.demand_marginal_utility[l, t])
+                                + pe.value(self.model.lambda_power_balance[t])
+                                - pe.value(self.model.omega_d_min[l, t])
+                                + pe.value(self.model.omega_d_max[l, t]))
+                if abs(stationary_val) > tolerance:
+                    stationarity_violations += 1
+        
+        verification["kkt_conditions_check"] = {
+            "power_balance_violations": int(power_balance_violations),
+            "power_balance_passed": power_balance_violations == 0,
+            "dual_feasibility_passed": dual_feasibility_passed,
+            "stationarity_violations": int(stationarity_violations),
+            "stationarity_passed": stationarity_violations == 0,
+            "overall_kkt_passed": (power_balance_violations == 0 and 
+                                  dual_feasibility_passed and 
+                                  stationarity_violations == 0)
+        }
+        
+        # ============ 3. ECONOMIC REASONABLENESS CHECK ============
+        # Get all prices
+        prices = [pe.value(self.model.lambda_power_balance[t]) for t in self.model.hours]
+        min_price = min(prices)
+        max_price = max(prices)
+        
+        # Per-hour price bounds check
+        # For each hour, check if the price is within the offer bounds of that specific hour
+        price_bound_violations = 0
+        hours_with_violations = []
+        
+        for t in self.model.hours:
+            price_t = pe.value(self.model.lambda_power_balance[t])
+            
+            # Get offer bounds for this hour specifically
+            # (considering all generators and consumers that have non-zero capacity in this hour)
+            offers_this_hour = []
+            
+            # Collect all generator marginal costs for this hour
+            for j in self.model.generators:
+                cost_jt = pe.value(self.model.generator_marginal_cost[j, t])
+                if cost_jt < 1_000_000:  # Exclude default high values
+                    offers_this_hour.append(cost_jt)
+            
+            # Collect all consumer marginal utilities for this hour
+            for l in self.model.consumers:
+                util_lt = pe.value(self.model.demand_marginal_utility[l, t])
+                offers_this_hour.append(util_lt)
+            
+            if offers_this_hour:
+                min_offer_t = min(offers_this_hour)
+                max_offer_t = max(offers_this_hour)
+                
+                # Check if price is within bounds for this hour (with tolerance)
+                if price_t < min_offer_t - tolerance or price_t > max_offer_t + tolerance:
+                    price_bound_violations += 1
+                    hours_with_violations.append({
+                        "hour": t,
+                        "price": price_t,
+                        "min_bound": min_offer_t,
+                        "max_bound": max_offer_t
+                    })
+        
+        # Check production monotonicity (production should generally increase with price within reasonable bounds)
+        # For each generator, check if production correlates with prices
+        monotonicity_checks = 0
+        monotonicity_passed = 0
+        
+        for j in self.model.generators:
+            generator_productions = [pe.value(self.model.production[j, t]) for t in self.model.hours]
+            # Only check if there's variance in production
+            if np.std(generator_productions) > tolerance:
+                monotonicity_checks += 1
+                # Simple check: correlation should be positive for generators
+                if np.corrcoef(prices, generator_productions)[0, 1] > -0.1:
+                    monotonicity_passed += 1
+        
+        verification["economic_reasonableness_check"] = {
+            "min_price": float(min_price),
+            "max_price": float(max_price),
+            "price_range_span": float(max_price - min_price),
+            "per_hour_bound_violations": int(price_bound_violations),
+            "hours_with_violations": hours_with_violations,
+            "prices_within_bounds": price_bound_violations == 0,
+            "monotonicity_checks_performed": int(monotonicity_checks),
+            "monotonicity_checks_passed": int(monotonicity_passed),
+            "overall_economic_reasonableness": bool(price_bound_violations == 0)
+        }
+        
+        # ============ 4. SOLVER OPTIMALITY CHECK ============
+        # Extract optimality gap from solver results
+        optimality_gap_percent = None
+        optimality_gap_passed = False
+        termination = res.solver.termination_condition
+        
+        # Check termination condition first (most reliable)
+        if termination == po.TerminationCondition.optimal:
+            # Optimal solution achieved - gap is 0%
+            optimality_gap_percent = 0.0
+            optimality_gap_passed = True
+        elif termination == po.TerminationCondition.maxTimeLimit or termination == po.TerminationCondition.feasible:
+            # Timed out or only feasible solution found - try to extract gap from solver
+            try:
+                # For Gurobi, try to get the gap from results if available
+                if hasattr(res, 'solution') and len(res.solution) > 0:
+                    solution = res.solution[0]
+                    if hasattr(solution, 'gap') and solution.gap is not None:
+                        optimality_gap_percent = float(solution.gap) * 100
+                    elif hasattr(solution, 'MIPGap') and solution.MIPGap is not None:
+                        optimality_gap_percent = float(solution.MIPGap) * 100
+                
+                # Try alternative Gurobi-specific attributes
+                if optimality_gap_percent is None and hasattr(res.solver, 'results'):
+                    results = res.solver.results
+                    if hasattr(results, 'mip_gap') and results.mip_gap is not None:
+                        optimality_gap_percent = float(results.mip_gap) * 100
+                
+                # If we found a gap, check if it's below 1%
+                if isinstance(optimality_gap_percent, float):
+                    optimality_gap_passed = optimality_gap_percent < 1.0
+                else:
+                    # Couldn't extract gap - mark as unknown but may still be acceptable
+                    optimality_gap_percent = "unknown"
+                    optimality_gap_passed = False
+            except:
+                optimality_gap_percent = "unknown"
+                optimality_gap_passed = False
+        else:
+            # Other termination conditions (infeasible, unbounded, etc.)
+            optimality_gap_percent = "N/A"
+            optimality_gap_passed = False
+        
+        verification["solver_optimality_check"] = {
+            "termination_condition": str(termination),
+            "solver_status": str(res.solver.status),
+            "optimality_gap_percent": optimality_gap_percent,
+            "gap_below_1_percent": bool(optimality_gap_passed) if isinstance(optimality_gap_passed, bool) else None,
+            "optimality_achieved": str(termination) == str(po.TerminationCondition.optimal)
+        }
+        
+        # ============ OVERALL VERDICT ============
+        verification["overall_valid"] = (
+            verification["complementarity_check"]["passed"] and
+            verification["kkt_conditions_check"]["overall_kkt_passed"] and
+            verification["economic_reasonableness_check"]["overall_economic_reasonableness"] and
+            (optimality_gap_passed if isinstance(optimality_gap_passed, bool) else True)
+        )
+        
+        return verification
+    
     def solve(self):
         start_time = time.time()
         res = self.solver.solve(self.model, tee=True)
@@ -223,14 +479,19 @@ class StrategicOfferingProblem():
         print(f"Strategic Profit: {profit}")
         print(f"Execution Time: {execution_time:.2f} s")
 
+        # Run numerical validation and verification
+        print("\n=== Running Numerical Validation and Verification ===")
+        verification_results = self._verify_solution(res)
+        
         self.results_info = {
             "ppa_percentage": ppa_percentage,
             "strategic_profit": profit,
             "execution_time_seconds": execution_time,
             "solver_status": str(res.solver.status),
-            "solver_termination_condition": str(res.solver.termination_condition)
+            "solver_termination_condition": str(res.solver.termination_condition),
+            "numerical_validation": verification_results
         }
-
+        
         # Get market prices from lambda_power_balance variable
         market_price = {t: pe.value(self.model.lambda_power_balance[t]) for t in self.model.hours}
 
